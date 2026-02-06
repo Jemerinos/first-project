@@ -3,6 +3,21 @@ import { useMemo, useState } from 'react'
 const mmToM = (value) => Number(value || 0) / 1000
 const KANT_OPTIONS = [50, 60, 70, 90, 100, 150]
 const FASTENER_TYPES = ['none', 'grommets', 'locks', 'straps']
+const KANT_COLOR_OPTIONS = [
+  { id: 'brown-gloss', label: 'Коричневый (глянец)', color: '#5c3b1e' },
+  { id: 'brown-matte', label: 'Коричневый (матовый)', color: '#6e4b32' },
+  { id: 'black-gloss', label: 'Чёрный (глянец)', color: '#111111' },
+  { id: 'black-matte', label: 'Чёрный (матовый)', color: '#2b2b2b' },
+  { id: 'light-gray', label: 'Светло-серый', color: '#bfc4cb' },
+  { id: 'dark-gray', label: 'Тёмно-серый', color: '#5f6368' },
+  { id: 'white', label: 'Белый', color: '#f8fafc' },
+  { id: 'beige', label: 'Бежевый', color: '#d8c3a5' },
+  { id: 'red', label: 'Красный', color: '#b91c1c' },
+]
+const FILM_TYPES = [
+  { id: 'transparent', label: 'Прозрачная', color: '#dbeafe', opacity: 0.35 },
+  { id: 'tinted', label: 'Тонировка', color: '#94a3b8', opacity: 0.6 },
+]
 const SIDE_LABELS = {
   top: 'Верх',
   right: 'Правая',
@@ -169,7 +184,7 @@ function sideSegments(shape, geometry) {
   }
 }
 
-function Drawing({ shape, geometry, sideSettings, filmColor, kantColor, fastenersBySide }) {
+function Drawing({ shape, geometry, filmStyle, kantColor, fastenersBySide }) {
   const width = 460
   const height = 360
   const padding = 40
@@ -199,15 +214,15 @@ function Drawing({ shape, geometry, sideSettings, filmColor, kantColor, fastener
           <line x1={tx(0)} y1={ty(geometry.arc.radius)} x2={tx(geometry.arc.width)} y2={ty(geometry.arc.radius)} stroke={kantColor} strokeWidth="3" />
           <path
             d={`M ${tx(0)} ${ty(geometry.arc.radius)} A ${geometry.arc.radius * scale} ${geometry.arc.radius * scale} 0 0 1 ${tx(geometry.arc.width)} ${ty(geometry.arc.radius)} L ${tx(geometry.arc.width)} ${ty(geometry.arc.radius)} L ${tx(0)} ${ty(geometry.arc.radius)} Z`}
-            fill={filmColor}
-            opacity="0.5"
+            fill={filmStyle.color}
+            opacity={filmStyle.opacity}
           />
         </>
       ) : (
         <polygon
           points={points.map((p) => `${tx(p.x)},${ty(p.y)}`).join(' ')}
-          fill={filmColor}
-          fillOpacity="0.5"
+          fill={filmStyle.color}
+          fillOpacity={filmStyle.opacity}
           stroke={kantColor}
           strokeWidth="3"
         />
@@ -271,13 +286,22 @@ export default function App() {
   })
   const [rightAngles, setRightAngles] = useState({ topLeft: true, topRight: true, bottomRight: true, bottomLeft: true })
   const [sideSettings, setSideSettings] = useState(initialSideSettings)
-  const [filmColor, setFilmColor] = useState('#a5f3fc')
-  const [kantColor, setKantColor] = useState('#0f172a')
+  const [filmType, setFilmType] = useState(FILM_TYPES[0].id)
+  const [kantColorId, setKantColorId] = useState(KANT_COLOR_OPTIONS[0].id)
   const [options, setOptions] = useState({
     bottomWeight: false,
     topDrip: false,
     rollStraps: false,
   })
+
+  const selectedKantColor = useMemo(
+    () => KANT_COLOR_OPTIONS.find((option) => option.id === kantColorId) ?? KANT_COLOR_OPTIONS[0],
+    [kantColorId],
+  )
+  const selectedFilm = useMemo(
+    () => FILM_TYPES.find((option) => option.id === filmType) ?? FILM_TYPES[0],
+    [filmType],
+  )
 
   const geometry = useMemo(() => getGeometry(shape, dimensions, rightAngles), [shape, dimensions, rightAngles])
 
@@ -307,7 +331,10 @@ export default function App() {
       shape,
       dimensions,
       rightAngles,
-      colors: { filmColor, kantColor },
+      colors: {
+        film: { type: selectedFilm.id, label: selectedFilm.label },
+        kant: { id: selectedKantColor.id, label: selectedKantColor.label, hex: selectedKantColor.color },
+      },
       sideSettings,
       options,
       metrics: {
@@ -319,7 +346,7 @@ export default function App() {
       ),
       rollStrapsCount: strapsCount,
     }),
-    [dimensions, fastenersBySide, filmColor, kantColor, options, result, rightAngles, shape, sideSettings, strapsCount],
+    [dimensions, fastenersBySide, options, result, rightAngles, selectedFilm, selectedKantColor, shape, sideSettings, strapsCount],
   )
 
   const handleExport = () => {
@@ -423,14 +450,26 @@ export default function App() {
             </div>
           ))}
 
-          <div className="grid grid-cols-2 gap-2 text-sm">
+          <div className="grid grid-cols-1 gap-2 text-sm">
             <label>
-              Цвет плёнки
-              <input type="color" className="mt-1 h-10 w-full rounded border" value={filmColor} onChange={(e) => setFilmColor(e.target.value)} />
+              Тип плёнки
+              <select className="mt-1 w-full rounded border p-2" value={filmType} onChange={(e) => setFilmType(e.target.value)}>
+                {FILM_TYPES.map((film) => (
+                  <option key={film.id} value={film.id}>
+                    {film.label}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               Цвет канта
-              <input type="color" className="mt-1 h-10 w-full rounded border" value={kantColor} onChange={(e) => setKantColor(e.target.value)} />
+              <select className="mt-1 w-full rounded border p-2" value={kantColorId} onChange={(e) => setKantColorId(e.target.value)}>
+                {KANT_COLOR_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
 
@@ -443,7 +482,13 @@ export default function App() {
 
         <section className="space-y-3 rounded-xl bg-white p-4 shadow">
           <h2 className="text-lg font-semibold">Чертёж и результат</h2>
-          <Drawing shape={shape} geometry={geometry} sideSettings={sideSettings} filmColor={filmColor} kantColor={kantColor} fastenersBySide={fastenersBySide} />
+          <Drawing
+            shape={shape}
+            geometry={geometry}
+            filmStyle={selectedFilm}
+            kantColor={selectedKantColor.color}
+            fastenersBySide={fastenersBySide}
+          />
 
           <div className="rounded bg-slate-100 p-3 text-sm">
             <p>Площадь: <strong>{result.area.toFixed(2)} м²</strong></p>

@@ -205,14 +205,32 @@ export default function App() {
     const element = productionRef.current
     if (!element) return
 
-    const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')])
-    const canvas = await html2canvas(element)
-    const img = canvas.toDataURL('image/png')
-    const pdf = new jsPDF('p', 'mm', 'a4')
-    const width = 190
-    const height = (canvas.height * width) / canvas.width
-    pdf.addImage(img, 'PNG', 10, 10, width, height)
-    pdf.save(`production-sheet-${orderId || 'draft'}.pdf`)
+    try {
+      const html2canvasLib = 'html2canvas'
+      const jsPdfLib = 'jspdf'
+      const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+        import(/* @vite-ignore */ html2canvasLib),
+        import(/* @vite-ignore */ jsPdfLib),
+      ])
+      const canvas = await html2canvas(element)
+      const img = canvas.toDataURL('image/png')
+      const pdf = new jsPDF('p', 'mm', 'a4')
+      const width = 190
+      const height = (canvas.height * width) / canvas.width
+      pdf.addImage(img, 'PNG', 10, 10, width, height)
+      pdf.save(`production-sheet-${orderId || 'draft'}.pdf`)
+    } catch {
+      const html = `
+        <html><head><meta charset="utf-8"><title>Production Sheet</title></head><body>${element.innerHTML}</body></html>
+      `
+      const blob = new Blob([html], { type: 'text/html' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `production-sheet-${orderId || 'draft'}.html`
+      a.click()
+      URL.revokeObjectURL(url)
+    }
   }
 
   const generateWriteOffForm = async () => {

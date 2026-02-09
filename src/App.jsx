@@ -122,7 +122,8 @@ export default function App() {
       if (type === 'none') continue
       const start = vertices[i]
       const end = vertices[(i + 1) % sideCount]
-      const segmentFasteners = computeFastenersOnSegment(start, end, type)
+      const edgeOffsetMm = 25 + Number(sideKant[side] || 0) / 2
+      const segmentFasteners = computeFastenersOnSegment(start, end, type, edgeOffsetMm)
       list.push({ side, type, count: segmentFasteners.count, step_mm: segmentFasteners.step_mm, placements: segmentFasteners.placements, kant_mm: sideKant[side] || 50 })
     }
     return list

@@ -4,7 +4,7 @@ const STEP_TARGET = {
   straps: 425,
 }
 
-export function computeFastenersOnSegment(start, end, type) {
+export function computeFastenersOnSegment(start, end, type, edgeOffsetMm = 25) {
   const dx = end.x - start.x
   const dy = end.y - start.y
   const length = Math.hypot(dx, dy)
@@ -13,7 +13,7 @@ export function computeFastenersOnSegment(start, end, type) {
     return { type, count: 0, step_mm: 0, placements: [] }
   }
 
-  const offset = 25
+  const offset = Math.max(0, Number(edgeOffsetMm || 0))
   const usable = Math.max(0, length - offset * 2)
 
   if (type === 'grommets') {

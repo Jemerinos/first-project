@@ -3,12 +3,7 @@ import TriangleInput from './components/TriangleInput'
 import TrapezoidInput from './components/TrapezoidInput'
 import SVGCanvas from './components/SVGCanvas'
 import { computeFastenersOnSegment } from './lib/fasteners.v1'
-import {
-  computeRightTriangleFromCatheti,
-  computeTriangleFromBaseHeight,
-  computeTriangleFromSides,
-  computeTrapezoid,
-} from './lib/geometry.v1'
+import { computeRightTriangleFromCatheti, computeTriangleFromSides, computeTrapezoid } from './lib/geometry.v1'
 import { assembleMaterials, estimateCosts, RULES_VERSION } from './lib/calculator.rules.v1'
 
 const SIDE_NAMES = ['A', 'B', 'C', 'D']
@@ -18,6 +13,21 @@ const FASTENER_OPTIONS = {
   locks: 'Замки',
   straps: 'Ремни',
 }
+const FILM_OPTIONS = [
+  { id: 'transparent', label: 'Прозрачная', color: '#dbeafe' },
+  { id: 'tinted', label: 'Тонировка', color: '#94a3b8' },
+]
+const KANT_COLOR_OPTIONS = [
+  { id: 'brown-gloss', label: 'Коричневый (глянец)', color: '#5c3b1e' },
+  { id: 'brown-matte', label: 'Коричневый (матовый)', color: '#6e4b32' },
+  { id: 'black-gloss', label: 'Чёрный (глянец)', color: '#111111' },
+  { id: 'black-matte', label: 'Чёрный (матовый)', color: '#2b2b2b' },
+  { id: 'light-gray', label: 'Светло-серый', color: '#bfc4cb' },
+  { id: 'dark-gray', label: 'Тёмно-серый', color: '#5f6368' },
+  { id: 'white', label: 'Белый', color: '#f8fafc' },
+  { id: 'beige', label: 'Бежевый', color: '#d8c3a5' },
+  { id: 'red', label: 'Красный', color: '#b91c1c' },
+]
 
 function geometryFromRectangle(width, height) {
   if (width <= 0 || height <= 0) return { valid: false, reason: 'Ширина и высота должны быть больше 0.' }
@@ -38,7 +48,7 @@ function geometryFromRectangle(width, height) {
 function rotateTriangleToRightAngle(vertices, rightAngle) {
   if (!vertices || vertices.length !== 3) return vertices
   const map = { A: 0, B: 1, C: 2 }
-  const rightIndex = map[rightAngle] ?? 2
+  const rightIndex = map[rightAngle] ?? 0
   if (rightIndex === 0) return vertices
   if (rightIndex === 1) return [vertices[1], vertices[2], vertices[0]]
   return [vertices[2], vertices[0], vertices[1]]
@@ -50,95 +60,67 @@ export default function App() {
   const [triangleMode, setTriangleMode] = useState('sides')
   const [triangleRightAngle, setTriangleRightAngle] = useState('A')
   const [triangleSides, setTriangleSides] = useState({ a: 3000, b: 4000, c: 5000 })
-  const [triangleBaseHeight, setTriangleBaseHeight] = useState({ base: 3000, height: 2000 })
   const [triangleCatheti, setTriangleCatheti] = useState({ width: 3000, height: 4000 })
   const [trapezoid, setTrapezoid] = useState({ baseA: 2000, baseB: 2600, left: 1500, right: 1700 })
   const [trapezoidFlags, setTrapezoidFlags] = useState({ topLeft: false, topRight: false, bottomRight: false, bottomLeft: false })
+  const [filmType, setFilmType] = useState(FILM_OPTIONS[0].id)
+  const [kantColorId, setKantColorId] = useState(KANT_COLOR_OPTIONS[0].id)
 
   const [sideFasteners, setSideFasteners] = useState({ A: 'grommets', B: 'grommets', C: 'grommets', D: 'grommets' })
   const [laborCost, setLaborCost] = useState(0)
   const [markupPercent, setMarkupPercent] = useState(30)
   const [calcResult, setCalcResult] = useState(null)
 
+  const selectedFilm = FILM_OPTIONS.find((f) => f.id === filmType) || FILM_OPTIONS[0]
+  const selectedKantColor = KANT_COLOR_OPTIONS.find((c) => c.id === kantColorId) || KANT_COLOR_OPTIONS[0]
+
   const geometryResult = useMemo(() => {
     if (shape === 'triangle') {
-      const baseResult =
-        triangleMode === 'sides'
-          ? computeTriangleFromSides(triangleSides.a, triangleSides.b, triangleSides.c)
-          : triangleMode === 'baseHeight'
-            ? computeTriangleFromBaseHeight(triangleBaseHeight.base, triangleBaseHeight.height)
-            : computeRightTriangleFromCatheti(triangleCatheti.width, triangleCatheti.height)
+      const baseResult = triangleMode === 'sides'
+        ? computeTriangleFromSides(triangleSides.a, triangleSides.b, triangleSides.c)
+        : computeRightTriangleFromCatheti(triangleCatheti.width, triangleCatheti.height)
 
       if (!baseResult.valid) return baseResult
-
-      return {
-        ...baseResult,
-        vertices: rotateTriangleToRightAngle(baseResult.vertices, triangleRightAngle),
-      }
+      return { ...baseResult, vertices: rotateTriangleToRightAngle(baseResult.vertices, triangleRightAngle) }
     }
-    if (shape === 'trapezoid') {
-      return computeTrapezoid(trapezoid.baseA, trapezoid.baseB, trapezoid.left, trapezoid.right, trapezoidFlags)
-    }
+    if (shape === 'trapezoid') return computeTrapezoid(trapezoid.baseA, trapezoid.baseB, trapezoid.left, trapezoid.right, trapezoidFlags)
     return geometryFromRectangle(Number(rect.width), Number(rect.height))
-  }, [
-    shape,
-    triangleMode,
-    triangleSides,
-    triangleBaseHeight,
-    triangleCatheti,
-    triangleRightAngle,
-    trapezoid,
-    trapezoidFlags,
-    rect,
-  ])
+  }, [shape, triangleMode, triangleSides, triangleCatheti, triangleRightAngle, trapezoid, trapezoidFlags, rect])
+
+  const effectiveFastenersBySide = useMemo(() => {
+    if (shape !== 'rectangle') return sideFasteners
+    return {
+      A: sideFasteners.A,
+      B: sideFasteners.B,
+      C: sideFasteners.A,
+      D: sideFasteners.B,
+    }
+  }, [shape, sideFasteners])
 
   const fasteners = useMemo(() => {
     if (!geometryResult.valid) return []
     const vertices = geometryResult.vertices
     const sideCount = vertices.length
-
     const list = []
     for (let i = 0; i < sideCount; i += 1) {
       const side = SIDE_NAMES[i]
-      const type = sideFasteners[side] || 'none'
+      const type = effectiveFastenersBySide[side] || 'none'
       if (type === 'none') continue
       const start = vertices[i]
       const end = vertices[(i + 1) % sideCount]
       const segmentFasteners = computeFastenersOnSegment(start, end, type)
-      list.push({
-        side,
-        type,
-        count: segmentFasteners.count,
-        step_mm: segmentFasteners.step_mm,
-        placements: segmentFasteners.placements,
-      })
+      list.push({ side, type, count: segmentFasteners.count, step_mm: segmentFasteners.step_mm, placements: segmentFasteners.placements })
     }
     return list
-  }, [geometryResult, sideFasteners])
+  }, [geometryResult, effectiveFastenersBySide])
 
   const handleCalculate = () => {
     if (!geometryResult.valid) return
-
-    const geometry = {
-      billableAreaM2: Math.max(1, geometryResult.area_mm2 / 1_000_000),
-      perimeterM: geometryResult.perimeter_mm / 1000,
-    }
-
-    const fastenersBySide = Object.fromEntries(
-      fasteners.map((side) => [side.side, { type: side.type, count: side.count }]),
-    )
-
-    const materials = assembleMaterials({
-      geometry,
-      fastenersBySide,
-      options: { bottomWeight: false, topDrip: false, rollStraps: false },
-      additionalMaterials: [],
-      rollStrapsCount: 0,
-    })
-
+    const geometry = { billableAreaM2: Math.max(1, geometryResult.area_mm2 / 1_000_000), perimeterM: geometryResult.perimeter_mm / 1000 }
+    const fastenersBySide = Object.fromEntries(fasteners.map((side) => [side.side, { type: side.type, count: side.count }]))
+    const materials = assembleMaterials({ geometry, fastenersBySide, options: { bottomWeight: false, topDrip: false, rollStraps: false }, additionalMaterials: [], rollStrapsCount: 0 })
     const specification = materials.map((m) => ({ ...m, lineTotal: Number((m.quantity * m.unitPrice).toFixed(2)) }))
     const cost = estimateCosts(materials, laborCost, markupPercent)
-
     setCalcResult({ specification, cost })
   }
 
@@ -148,13 +130,8 @@ export default function App() {
       created_by: 'Менеджер',
       created_at: new Date().toISOString(),
       rules_version: RULES_VERSION,
-      geometry: {
-        vertices: geometryResult.vertices || [],
-        sides: geometryResult.sides || null,
-        area_mm2: geometryResult.area_mm2 || 0,
-        perimeter_mm: geometryResult.perimeter_mm || 0,
-        shapeType: shape,
-      },
+      geometry: { vertices: geometryResult.vertices || [], sides: geometryResult.sides || null, area_mm2: geometryResult.area_mm2 || 0, perimeter_mm: geometryResult.perimeter_mm || 0, shapeType: shape },
+      colors: { film: selectedFilm, kant: selectedKantColor },
       fasteners,
       specification: calcResult?.specification || [],
       cost: calcResult?.cost || null,
@@ -171,7 +148,6 @@ export default function App() {
   return (
     <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
       <h1 className="text-2xl font-bold">Калькулятор «Мягкие окна»</h1>
-
       <div className="grid gap-4 lg:grid-cols-3">
         <section className="space-y-3 rounded-xl bg-white p-4 shadow">
           <label className="block text-sm">Фигура
@@ -184,12 +160,8 @@ export default function App() {
 
           {shape === 'rectangle' && (
             <div className="grid grid-cols-2 gap-2">
-              <label className="text-sm">Ширина (мм)
-                <input type="number" className="mt-1 w-full rounded border p-2" value={rect.width} onChange={(e) => setRect((p) => ({ ...p, width: Number(e.target.value || 0) }))} />
-              </label>
-              <label className="text-sm">Высота (мм)
-                <input type="number" className="mt-1 w-full rounded border p-2" value={rect.height} onChange={(e) => setRect((p) => ({ ...p, height: Number(e.target.value || 0) }))} />
-              </label>
+              <label className="text-sm">Ширина (мм)<input type="number" className="mt-1 w-full rounded border p-2" value={rect.width} onChange={(e) => setRect((p) => ({ ...p, width: Number(e.target.value || 0) }))} /></label>
+              <label className="text-sm">Высота (мм)<input type="number" className="mt-1 w-full rounded border p-2" value={rect.height} onChange={(e) => setRect((p) => ({ ...p, height: Number(e.target.value || 0) }))} /></label>
             </div>
           )}
 
@@ -200,11 +172,9 @@ export default function App() {
               rightAngle={triangleRightAngle}
               onRightAngleChange={setTriangleRightAngle}
               sides={triangleSides}
-              baseHeight={triangleBaseHeight}
               catheti={triangleCatheti}
               errors={{}}
               onSidesChange={(k, v) => setTriangleSides((p) => ({ ...p, [k]: v }))}
-              onBaseHeightChange={(k, v) => setTriangleBaseHeight((p) => ({ ...p, [k]: v }))}
               onCathetiChange={(k, v) => setTriangleCatheti((p) => ({ ...p, [k]: v }))}
             />
           )}
@@ -219,18 +189,44 @@ export default function App() {
             />
           )}
 
+          <label className="block text-sm">Тип плёнки
+            <select className="mt-1 w-full rounded border p-2" value={filmType} onChange={(e) => setFilmType(e.target.value)}>
+              {FILM_OPTIONS.map((film) => <option key={film.id} value={film.id}>{film.label}</option>)}
+            </select>
+          </label>
+          <label className="block text-sm">Цвет канта
+            <select className="mt-1 w-full rounded border p-2" value={kantColorId} onChange={(e) => setKantColorId(e.target.value)}>
+              {KANT_COLOR_OPTIONS.map((color) => <option key={color.id} value={color.id}>{color.label}</option>)}
+            </select>
+          </label>
+
           {!geometryResult.valid && <p className="rounded bg-rose-50 p-2 text-sm text-rose-700">Ошибка геометрии: {geometryResult.reason}</p>}
         </section>
 
         <section className="space-y-3 rounded-xl bg-white p-4 shadow">
           <h2 className="font-semibold">Крепления по сторонам</h2>
-          {SIDE_NAMES.map((side) => (
-            <label key={side} className="block text-sm">Сторона {side}
-              <select className="mt-1 w-full rounded border p-2" value={sideFasteners[side]} onChange={(e) => setSideFasteners((p) => ({ ...p, [side]: e.target.value }))}>
-                {Object.entries(FASTENER_OPTIONS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-            </label>
-          ))}
+          {shape === 'rectangle' ? (
+            <>
+              <label className="block text-sm">Горизонтальные стороны (A и C)
+                <select className="mt-1 w-full rounded border p-2" value={sideFasteners.A} onChange={(e) => setSideFasteners((p) => ({ ...p, A: e.target.value }))}>
+                  {Object.entries(FASTENER_OPTIONS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <label className="block text-sm">Вертикальные стороны (B и D)
+                <select className="mt-1 w-full rounded border p-2" value={sideFasteners.B} onChange={(e) => setSideFasteners((p) => ({ ...p, B: e.target.value }))}>
+                  {Object.entries(FASTENER_OPTIONS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+            </>
+          ) : (
+            SIDE_NAMES.map((side) => (
+              <label key={side} className="block text-sm">Сторона {side}
+                <select className="mt-1 w-full rounded border p-2" value={sideFasteners[side]} onChange={(e) => setSideFasteners((p) => ({ ...p, [side]: e.target.value }))}>
+                  {Object.entries(FASTENER_OPTIONS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+            ))
+          )}
 
           <label className="block text-sm">Стоимость работ
             <input type="number" className="mt-1 w-full rounded border p-2" value={laborCost} onChange={(e) => setLaborCost(Number(e.target.value || 0))} />
@@ -247,27 +243,22 @@ export default function App() {
 
         <section className="space-y-3 rounded-xl bg-white p-4 shadow">
           <h2 className="font-semibold">SVG-чертёж</h2>
-          <SVGCanvas vertices={geometryResult.vertices || []} fasteners={fasteners} triangleRightAngle={shape === 'triangle' ? triangleRightAngle : undefined} />
-          {geometryResult.valid && (
-            <p className="text-sm">Площадь: {(geometryResult.area_mm2 / 1_000_000).toFixed(3)} м², Периметр: {(geometryResult.perimeter_mm / 1000).toFixed(3)} м</p>
-          )}
+          <SVGCanvas
+            vertices={geometryResult.vertices || []}
+            fasteners={fasteners}
+            triangleRightAngle={shape === 'triangle' ? triangleRightAngle : undefined}
+            filmColor={selectedFilm.color}
+            kantColor={selectedKantColor.color}
+          />
+          {geometryResult.valid && <p className="text-sm">Площадь: {(geometryResult.area_mm2 / 1_000_000).toFixed(3)} м², Периметр: {(geometryResult.perimeter_mm / 1000).toFixed(3)} м</p>}
 
           <h3 className="pt-2 font-semibold">Расход фурнитуры</h3>
           <table className="w-full border text-sm">
             <thead className="bg-slate-100"><tr><th className="border p-1">Сторона</th><th className="border p-1">Тип</th><th className="border p-1">Кол-во</th><th className="border p-1">Шаг, мм</th></tr></thead>
             <tbody>
-              {fasteners.length === 0 ? (
-                <tr><td className="border p-1 text-center" colSpan="4">Крепления не выбраны</td></tr>
-              ) : (
-                fasteners.map((item) => (
-                  <tr key={`${item.side}-${item.type}`}>
-                    <td className="border p-1">{item.side}</td>
-                    <td className="border p-1">{FASTENER_OPTIONS[item.type]}</td>
-                    <td className="border p-1">{item.count}</td>
-                    <td className="border p-1">{item.step_mm.toFixed(1)}</td>
-                  </tr>
-                ))
-              )}
+              {fasteners.length === 0 ? <tr><td className="border p-1 text-center" colSpan="4">Крепления не выбраны</td></tr> : fasteners.map((item) => (
+                <tr key={`${item.side}-${item.type}`}><td className="border p-1">{item.side}</td><td className="border p-1">{FASTENER_OPTIONS[item.type]}</td><td className="border p-1">{item.count}</td><td className="border p-1">{item.step_mm.toFixed(1)}</td></tr>
+              ))}
             </tbody>
           </table>
         </section>
@@ -279,9 +270,7 @@ export default function App() {
           <table className="w-full border text-sm">
             <thead className="bg-slate-100"><tr><th className="border p-1">SKU</th><th className="border p-1">Наименование</th><th className="border p-1">Кол-во</th><th className="border p-1">Цена</th><th className="border p-1">Сумма</th></tr></thead>
             <tbody>
-              {calcResult.specification.map((line) => (
-                <tr key={`${line.sku}-${line.name}`}><td className="border p-1">{line.sku}</td><td className="border p-1">{line.name}</td><td className="border p-1">{line.quantity}</td><td className="border p-1">{line.unitPrice}</td><td className="border p-1">{line.lineTotal}</td></tr>
-              ))}
+              {calcResult.specification.map((line) => <tr key={`${line.sku}-${line.name}`}><td className="border p-1">{line.sku}</td><td className="border p-1">{line.name}</td><td className="border p-1">{line.quantity}</td><td className="border p-1">{line.unitPrice}</td><td className="border p-1">{line.lineTotal}</td></tr>)}
             </tbody>
           </table>
           <p className="text-sm">Материалы: {calcResult.cost.materialsCost} ₽ | Работы: {calcResult.cost.laborCost} ₽ | Наценка: {calcResult.cost.markupPercent}% | <strong>Итого: {calcResult.cost.totalPrice} ₽</strong></p>

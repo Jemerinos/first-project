@@ -8,7 +8,7 @@ function midpoint(a, b) {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
 }
 
-export default function SVGCanvas({ vertices = [], fasteners = [], triangleRightAngle }) {
+export default function SVGCanvas({ vertices = [], fasteners = [], triangleRightAngle, filmColor = '#cbd5e1', kantColor = '#0f172a' }) {
   if (!vertices.length) return <div className="rounded bg-slate-100 p-4 text-sm">Нет геометрии для отрисовки.</div>
 
   const minX = Math.min(...vertices.map((v) => v.x))
@@ -22,7 +22,7 @@ export default function SVGCanvas({ vertices = [], fasteners = [], triangleRight
 
   return (
     <svg viewBox={viewBox} className="h-[360px] w-full rounded-lg bg-slate-50">
-      <polygon points={vertices.map((v) => `${v.x},${v.y}`).join(' ')} fill="#cbd5e1" fillOpacity="0.35" stroke="#0f172a" strokeWidth="6" />
+      <polygon points={vertices.map((v) => `${v.x},${v.y}`).join(' ')} fill={filmColor} fillOpacity="0.35" stroke={kantColor} strokeWidth="6" />
 
       {vertices.map((v, i) => {
         const next = vertices[(i + 1) % vertices.length]

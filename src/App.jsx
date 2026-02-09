@@ -46,6 +46,18 @@ function geometryFromRectangle(width, height) {
   }
 }
 
+
+function sideLengths(vertices) {
+  const names = ['A', 'B', 'C', 'D']
+  const result = {}
+  for (let i = 0; i < vertices.length; i += 1) {
+    const a = vertices[i]
+    const b = vertices[(i + 1) % vertices.length]
+    result[names[i]] = Math.hypot(b.x - a.x, b.y - a.y)
+  }
+  return result
+}
+
 function rotateTriangleToRightAngle(vertices, rightAngle) {
   if (!vertices || vertices.length !== 3) return vertices
   const map = { A: 0, B: 1, C: 2 }
@@ -116,7 +128,10 @@ export default function App() {
 
   const handleCalculate = () => {
     if (!geometryResult.valid) return
-    const geometry = { billableAreaM2: Math.max(1, geometryResult.area_mm2 / 1_000_000), perimeterM: geometryResult.perimeter_mm / 1000 }
+    const lengths = sideLengths(geometryResult.vertices)
+    const kantAreaMm2 = Object.entries(lengths).reduce((acc, [side, len]) => acc + len * Number(sideKant[side] || 0), 0)
+    const totalAreaMm2 = geometryResult.area_mm2 + kantAreaMm2
+    const geometry = { billableAreaM2: Math.max(1, totalAreaMm2 / 1_000_000), perimeterM: geometryResult.perimeter_mm / 1000 }
     const fastenersBySide = Object.fromEntries(fasteners.map((side) => [side.side, { type: side.type, count: side.count }]))
     const materials = assembleMaterials({
       geometry,
@@ -253,8 +268,11 @@ export default function App() {
             triangleRightAngle={shape === 'triangle' ? triangleRightAngle : undefined}
             filmColor={selectedFilm.color}
             kantColor={selectedKantColor.color}
+            sideKant={sideKant}
+            hooksEnabled={hooksEnabled}
+            hooksCount={hooksCount}
           />
-          {geometryResult.valid && <p className="text-sm">Площадь: {(geometryResult.area_mm2 / 1_000_000).toFixed(3)} м², Периметр: {(geometryResult.perimeter_mm / 1000).toFixed(3)} м</p>}
+          {geometryResult.valid && <p className="text-sm">Площадь (с кантом): {(Math.max(1, (geometryResult.area_mm2 + Object.entries(sideLengths(geometryResult.vertices)).reduce((acc,[side,len]) => acc + len * Number(sideKant[side] || 0), 0)) / 1_000_000)).toFixed(3)} м², Периметр: {(geometryResult.perimeter_mm / 1000).toFixed(3)} м</p>}
 
           <h3 className="pt-2 font-semibold">Расход фурнитуры</h3>
           <table className="w-full border text-sm">

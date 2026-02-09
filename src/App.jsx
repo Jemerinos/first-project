@@ -7,6 +7,7 @@ import { computeRightTriangleFromCatheti, computeTriangleFromSides, computeTrape
 import { assembleMaterials, estimateCosts, RULES_VERSION } from './lib/calculator.rules.v1'
 
 const SIDE_NAMES = ['A', 'B', 'C', 'D']
+const KANT_OPTIONS = [50, 60, 70, 90, 100, 150]
 const FASTENER_OPTIONS = {
   none: 'Без креплений',
   grommets: 'Люверсы',
@@ -65,8 +66,10 @@ export default function App() {
   const [trapezoidFlags, setTrapezoidFlags] = useState({ topLeft: false, topRight: false, bottomRight: false, bottomLeft: false })
   const [filmType, setFilmType] = useState(FILM_OPTIONS[0].id)
   const [kantColorId, setKantColorId] = useState(KANT_COLOR_OPTIONS[0].id)
+  const [hooksEnabled, setHooksEnabled] = useState(false)
 
   const [sideFasteners, setSideFasteners] = useState({ A: 'grommets', B: 'grommets', C: 'grommets', D: 'grommets' })
+  const [sideKant, setSideKant] = useState({ A: 50, B: 50, C: 50, D: 50 })
   const [laborCost, setLaborCost] = useState(0)
   const [markupPercent, setMarkupPercent] = useState(30)
   const [calcResult, setCalcResult] = useState(null)
@@ -87,15 +90,12 @@ export default function App() {
     return geometryFromRectangle(Number(rect.width), Number(rect.height))
   }, [shape, triangleMode, triangleSides, triangleCatheti, triangleRightAngle, trapezoid, trapezoidFlags, rect])
 
-  const effectiveFastenersBySide = useMemo(() => {
-    if (shape !== 'rectangle') return sideFasteners
-    return {
-      A: sideFasteners.A,
-      B: sideFasteners.B,
-      C: sideFasteners.A,
-      D: sideFasteners.B,
-    }
-  }, [shape, sideFasteners])
+  const hooksCount = useMemo(() => {
+    if (!hooksEnabled || !geometryResult.valid) return 0
+    const xs = geometryResult.vertices.map((v) => v.x)
+    const width = Math.max(...xs) - Math.min(...xs)
+    return Math.max(2, Math.ceil(width / 1500) * 2)
+  }, [hooksEnabled, geometryResult])
 
   const fasteners = useMemo(() => {
     if (!geometryResult.valid) return []
@@ -104,21 +104,27 @@ export default function App() {
     const list = []
     for (let i = 0; i < sideCount; i += 1) {
       const side = SIDE_NAMES[i]
-      const type = effectiveFastenersBySide[side] || 'none'
+      const type = sideFasteners[side] || 'none'
       if (type === 'none') continue
       const start = vertices[i]
       const end = vertices[(i + 1) % sideCount]
       const segmentFasteners = computeFastenersOnSegment(start, end, type)
-      list.push({ side, type, count: segmentFasteners.count, step_mm: segmentFasteners.step_mm, placements: segmentFasteners.placements })
+      list.push({ side, type, count: segmentFasteners.count, step_mm: segmentFasteners.step_mm, placements: segmentFasteners.placements, kant_mm: sideKant[side] || 50 })
     }
     return list
-  }, [geometryResult, effectiveFastenersBySide])
+  }, [geometryResult, sideFasteners, sideKant])
 
   const handleCalculate = () => {
     if (!geometryResult.valid) return
     const geometry = { billableAreaM2: Math.max(1, geometryResult.area_mm2 / 1_000_000), perimeterM: geometryResult.perimeter_mm / 1000 }
     const fastenersBySide = Object.fromEntries(fasteners.map((side) => [side.side, { type: side.type, count: side.count }]))
-    const materials = assembleMaterials({ geometry, fastenersBySide, options: { bottomWeight: false, topDrip: false, rollStraps: false }, additionalMaterials: [], rollStrapsCount: 0 })
+    const materials = assembleMaterials({
+      geometry,
+      fastenersBySide,
+      options: { bottomWeight: false, topDrip: false, rollStraps: hooksEnabled },
+      additionalMaterials: [],
+      rollStrapsCount: hooksCount,
+    })
     const specification = materials.map((m) => ({ ...m, lineTotal: Number((m.quantity * m.unitPrice).toFixed(2)) }))
     const cost = estimateCosts(materials, laborCost, markupPercent)
     setCalcResult({ specification, cost })
@@ -132,6 +138,8 @@ export default function App() {
       rules_version: RULES_VERSION,
       geometry: { vertices: geometryResult.vertices || [], sides: geometryResult.sides || null, area_mm2: geometryResult.area_mm2 || 0, perimeter_mm: geometryResult.perimeter_mm || 0, shapeType: shape },
       colors: { film: selectedFilm, kant: selectedKantColor },
+      hooks: { enabled: hooksEnabled, count: hooksCount },
+      sideKant,
       fasteners,
       specification: calcResult?.specification || [],
       cost: calcResult?.cost || null,
@@ -199,34 +207,30 @@ export default function App() {
               {KANT_COLOR_OPTIONS.map((color) => <option key={color.id} value={color.id}>{color.label}</option>)}
             </select>
           </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={hooksEnabled} onChange={(e) => setHooksEnabled(e.target.checked)} />
+            Добавить крючки
+          </label>
 
           {!geometryResult.valid && <p className="rounded bg-rose-50 p-2 text-sm text-rose-700">Ошибка геометрии: {geometryResult.reason}</p>}
         </section>
 
         <section className="space-y-3 rounded-xl bg-white p-4 shadow">
-          <h2 className="font-semibold">Крепления по сторонам</h2>
-          {shape === 'rectangle' ? (
-            <>
-              <label className="block text-sm">Горизонтальные стороны (A и C)
-                <select className="mt-1 w-full rounded border p-2" value={sideFasteners.A} onChange={(e) => setSideFasteners((p) => ({ ...p, A: e.target.value }))}>
-                  {Object.entries(FASTENER_OPTIONS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
-              </label>
-              <label className="block text-sm">Вертикальные стороны (B и D)
-                <select className="mt-1 w-full rounded border p-2" value={sideFasteners.B} onChange={(e) => setSideFasteners((p) => ({ ...p, B: e.target.value }))}>
-                  {Object.entries(FASTENER_OPTIONS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
-              </label>
-            </>
-          ) : (
-            SIDE_NAMES.map((side) => (
-              <label key={side} className="block text-sm">Сторона {side}
+          <h2 className="font-semibold">Крепления и кант по сторонам</h2>
+          {SIDE_NAMES.map((side) => (
+            <div key={side} className="grid grid-cols-2 gap-2">
+              <label className="text-sm">Сторона {side}: крепление
                 <select className="mt-1 w-full rounded border p-2" value={sideFasteners[side]} onChange={(e) => setSideFasteners((p) => ({ ...p, [side]: e.target.value }))}>
                   {Object.entries(FASTENER_OPTIONS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </label>
-            ))
-          )}
+              <label className="text-sm">Сторона {side}: кант, мм
+                <select className="mt-1 w-full rounded border p-2" value={sideKant[side]} onChange={(e) => setSideKant((p) => ({ ...p, [side]: Number(e.target.value) }))}>
+                  {KANT_OPTIONS.map((k) => <option key={k} value={k}>{k}</option>)}
+                </select>
+              </label>
+            </div>
+          ))}
 
           <label className="block text-sm">Стоимость работ
             <input type="number" className="mt-1 w-full rounded border p-2" value={laborCost} onChange={(e) => setLaborCost(Number(e.target.value || 0))} />
@@ -254,10 +258,10 @@ export default function App() {
 
           <h3 className="pt-2 font-semibold">Расход фурнитуры</h3>
           <table className="w-full border text-sm">
-            <thead className="bg-slate-100"><tr><th className="border p-1">Сторона</th><th className="border p-1">Тип</th><th className="border p-1">Кол-во</th><th className="border p-1">Шаг, мм</th></tr></thead>
+            <thead className="bg-slate-100"><tr><th className="border p-1">Сторона</th><th className="border p-1">Тип</th><th className="border p-1">Кол-во</th><th className="border p-1">Шаг, мм</th><th className="border p-1">Кант, мм</th></tr></thead>
             <tbody>
-              {fasteners.length === 0 ? <tr><td className="border p-1 text-center" colSpan="4">Крепления не выбраны</td></tr> : fasteners.map((item) => (
-                <tr key={`${item.side}-${item.type}`}><td className="border p-1">{item.side}</td><td className="border p-1">{FASTENER_OPTIONS[item.type]}</td><td className="border p-1">{item.count}</td><td className="border p-1">{item.step_mm.toFixed(1)}</td></tr>
+              {fasteners.length === 0 ? <tr><td className="border p-1 text-center" colSpan="5">Крепления не выбраны</td></tr> : fasteners.map((item) => (
+                <tr key={`${item.side}-${item.type}`}><td className="border p-1">{item.side}</td><td className="border p-1">{FASTENER_OPTIONS[item.type]}</td><td className="border p-1">{item.count}</td><td className="border p-1">{item.step_mm.toFixed(1)}</td><td className="border p-1">{item.kant_mm}</td></tr>
               ))}
             </tbody>
           </table>

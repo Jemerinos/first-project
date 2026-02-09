@@ -1,6 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import {
+  RULES_VERSION,
+  calcAreaAndPerimeter,
+  calcSideFasteners,
+} from './lib/calculator.rules.v1'
+import { calculateOrder, createOrderDraft, getOrder } from './mockApi/ordersApi'
 
-const mmToM = (value) => Number(value || 0) / 1000
 const KANT_OPTIONS = [50, 60, 70, 90, 100, 150]
 const FASTENER_TYPES = ['none', 'grommets', 'locks', 'straps']
 const KANT_COLOR_OPTIONS = [
@@ -16,14 +21,9 @@ const KANT_COLOR_OPTIONS = [
 ]
 const FILM_TYPES = [
   { id: 'transparent', label: 'Прозрачная', color: '#dbeafe', opacity: 0.35 },
-  { id: 'tinted', label: 'Тонировка', color: '#94a3b8', opacity: 0.6 },
+  { id: 'tinted', label: 'Тонировка', color: '#64748b', opacity: 0.55 },
 ]
-const SIDE_LABELS = {
-  top: 'Верх',
-  right: 'Правая',
-  bottom: 'Низ',
-  left: 'Левая',
-}
+const SIDE_LABELS = { top: 'Верх', right: 'Правая', bottom: 'Низ', left: 'Левая' }
 const SHAPE_FIELDS = {
   rectangle: ['width', 'height'],
   trapezoid: ['top', 'right', 'bottom', 'left', 'height'],
@@ -35,236 +35,89 @@ const initialSideSettings = Object.fromEntries(
   Object.keys(SIDE_LABELS).map((side) => [side, { kant: 50, fastener: 'grommets' }]),
 )
 
-const readNum = (value) => {
-  const num = Number(value)
-  return Number.isFinite(num) && num >= 0 ? num : 0
-}
-
-function calcSideFasteners(lengthMm, type) {
-  if (type === 'none') {
-    return { type, count: 0, step: 0, points: [] }
-  }
-
-  const edgeOffset = 25
-  const usable = Math.max(0, lengthMm - edgeOffset * 2)
-
-  if (type === 'grommets') {
-    const step = 200
-    const intervals = Math.max(1, Math.floor(usable / step))
-    const count = intervals + 1
-    const dynamicStep = usable / intervals
-    const points = Array.from({ length: count }, (_, i) => edgeOffset + i * dynamicStep)
-    return { type, count, step: dynamicStep, points }
-  }
-
-  const step = 425
-  const innerCount = Math.max(0, Math.floor(usable / step))
-  const count = innerCount + 2
-  const innerStep = innerCount > 0 ? usable / (innerCount + 1) : 0
-  const points = [edgeOffset]
-  for (let i = 1; i <= innerCount; i += 1) {
-    points.push(edgeOffset + innerStep * i)
-  }
-  points.push(lengthMm - edgeOffset)
-
-  return {
-    type,
-    count,
-    step: innerStep || step,
-    points,
-    cornersAsGrommets: true,
-  }
-}
-
-function getGeometry(shape, dimensions, rightAngles) {
-  if (shape === 'rectangle') {
-    const width = readNum(dimensions.width)
-    const height = readNum(dimensions.height)
-    const points = [
-      { x: 0, y: 0 },
-      { x: width, y: 0 },
-      { x: width, y: height },
-      { x: 0, y: height },
-    ]
-    return {
-      points,
-      sides: { top: width, right: height, bottom: width, left: height },
-      areaM2: mmToM(width) * mmToM(height),
-      perimeterM: 2 * (mmToM(width) + mmToM(height)),
-      rightAngles,
-    }
-  }
-
-  if (shape === 'trapezoid') {
-    const top = readNum(dimensions.top)
-    const right = readNum(dimensions.right)
-    const bottom = readNum(dimensions.bottom)
-    const left = readNum(dimensions.left)
-    const h = readNum(dimensions.height)
-    const offset = Math.max(0, (bottom - top) / 2)
-    const points = [
-      { x: offset, y: 0 },
-      { x: offset + top, y: 0 },
-      { x: bottom, y: h },
-      { x: 0, y: h },
-    ]
-    const areaM2 = 0.5 * (mmToM(top) + mmToM(bottom)) * mmToM(h)
-    const perimeterM = mmToM(top + right + bottom + left)
-    return {
-      points,
-      sides: { top, right, bottom, left },
-      areaM2,
-      perimeterM,
-      rightAngles,
-    }
-  }
-
-  if (shape === 'triangle') {
-    const a = readNum(dimensions.a)
-    const b = readNum(dimensions.b)
-    const c = readNum(dimensions.c)
-    const x = (a ** 2 + c ** 2 - b ** 2) / (2 * a || 1)
-    const ySq = Math.max(0, c ** 2 - x ** 2)
-    const y = Math.sqrt(ySq)
-    const points = [
-      { x: 0, y: y },
-      { x: a, y: y },
-      { x, y: 0 },
-    ]
-    const s = (a + b + c) / 2
-    const areaMm = Math.sqrt(Math.max(0, s * (s - a) * (s - b) * (s - c)))
-    return {
-      points,
-      sides: { top: b, right: c, bottom: a, left: 0 },
-      areaM2: areaMm / 1000000,
-      perimeterM: mmToM(a + b + c),
-      rightAngles,
-    }
-  }
-
-  const width = readNum(dimensions.width)
-  const radius = readNum(dimensions.height)
-  const points = [
-    { x: 0, y: radius },
-    { x: width, y: radius },
-    { x: width, y: radius },
-    { x: 0, y: radius },
-  ]
-  return {
-    points,
-    sides: {
-      top: Math.PI * radius,
-      right: radius,
-      bottom: width,
-      left: radius,
-    },
-    arc: { radius, width },
-    areaM2: (Math.PI * mmToM(radius) ** 2) / 2,
-    perimeterM: mmToM(Math.PI * radius + width + 2 * radius),
-    rightAngles,
-  }
-}
-
-function sideSegments(shape, geometry) {
-  if (shape === 'triangle') {
-    const [p0, p1, p2] = geometry.points
-    return {
-      bottom: [p0, p1],
-      right: [p1, p2],
-      top: [p2, p0],
-    }
-  }
-
-  const [p0, p1, p2, p3] = geometry.points
-  return {
-    top: [p0, p1],
-    right: [p1, p2],
-    bottom: [p3, p2],
-    left: [p0, p3],
-  }
-}
-
 function Drawing({ shape, geometry, filmStyle, kantColor, fastenersBySide }) {
   const width = 460
   const height = 360
   const padding = 40
-  const points = geometry.points
+
+  const points = useMemo(() => {
+    if (shape === 'rectangle') {
+      return [
+        { x: 0, y: 0 },
+        { x: geometry.sides.top, y: 0 },
+        { x: geometry.sides.top, y: geometry.sides.left },
+        { x: 0, y: geometry.sides.left },
+      ]
+    }
+    if (shape === 'trapezoid') {
+      const top = geometry.sides.top
+      const bottom = geometry.sides.bottom
+      const h = Number(geometry.dims?.height || 0)
+      const offset = Math.max(0, (bottom - top) / 2)
+      return [
+        { x: offset, y: 0 },
+        { x: offset + top, y: 0 },
+        { x: bottom, y: h },
+        { x: 0, y: h },
+      ]
+    }
+    if (shape === 'triangle') {
+      const a = Number(geometry.dims?.a || 0)
+      const b = Number(geometry.dims?.b || 0)
+      const c = Number(geometry.dims?.c || 0)
+      const x = (a ** 2 + c ** 2 - b ** 2) / (2 * a || 1)
+      const y = Math.sqrt(Math.max(0, c ** 2 - x ** 2))
+      return [
+        { x: 0, y },
+        { x: a, y },
+        { x, y: 0 },
+      ]
+    }
+
+    const r = Number(geometry.dims?.height || 0)
+    const w = Number(geometry.dims?.width || 0)
+    return [
+      { x: 0, y: r },
+      { x: w, y: r },
+      { x: w, y: r },
+      { x: 0, y: r },
+    ]
+  }, [geometry, shape])
+
   const maxX = Math.max(...points.map((p) => p.x), 1)
   const maxY = Math.max(...points.map((p) => p.y), 1)
-  const scale = Math.min((width - 2 * padding) / maxX, (height - 2 * padding) / maxY)
-  const tx = (v) => padding + v * scale
-  const ty = (v) => padding + v * scale
+  const scale = Math.min((width - padding * 2) / maxX, (height - padding * 2) / maxY)
+  const tx = (x) => padding + x * scale
+  const ty = (y) => padding + y * scale
 
-  const segments = sideSegments(shape, geometry)
-
-  const angleMarks = Object.entries(geometry.rightAngles || {})
-    .filter(([, checked]) => checked)
-    .map(([corner]) => corner)
+  const seg = shape === 'triangle'
+    ? { top: [points[2], points[0]], right: [points[1], points[2]], bottom: [points[0], points[1]] }
+    : { top: [points[0], points[1]], right: [points[1], points[2]], bottom: [points[3], points[2]], left: [points[0], points[3]] }
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="w-full rounded-lg bg-slate-50">
       {shape === 'arch' ? (
         <>
-          <path
-            d={`M ${tx(0)} ${ty(geometry.arc.radius)} A ${geometry.arc.radius * scale} ${geometry.arc.radius * scale} 0 0 1 ${tx(geometry.arc.width)} ${ty(geometry.arc.radius)}`}
-            fill="none"
-            stroke={kantColor}
-            strokeWidth="3"
-          />
-          <line x1={tx(0)} y1={ty(geometry.arc.radius)} x2={tx(geometry.arc.width)} y2={ty(geometry.arc.radius)} stroke={kantColor} strokeWidth="3" />
-          <path
-            d={`M ${tx(0)} ${ty(geometry.arc.radius)} A ${geometry.arc.radius * scale} ${geometry.arc.radius * scale} 0 0 1 ${tx(geometry.arc.width)} ${ty(geometry.arc.radius)} L ${tx(geometry.arc.width)} ${ty(geometry.arc.radius)} L ${tx(0)} ${ty(geometry.arc.radius)} Z`}
-            fill={filmStyle.color}
-            opacity={filmStyle.opacity}
-          />
+          <path d={`M ${tx(0)} ${ty(geometry.sides.left)} A ${geometry.sides.left * scale} ${geometry.sides.left * scale} 0 0 1 ${tx(geometry.sides.bottom)} ${ty(geometry.sides.left)}`} fill="none" stroke={kantColor} strokeWidth="3" />
+          <line x1={tx(0)} y1={ty(geometry.sides.left)} x2={tx(geometry.sides.bottom)} y2={ty(geometry.sides.left)} stroke={kantColor} strokeWidth="3" />
+          <path d={`M ${tx(0)} ${ty(geometry.sides.left)} A ${geometry.sides.left * scale} ${geometry.sides.left * scale} 0 0 1 ${tx(geometry.sides.bottom)} ${ty(geometry.sides.left)} L ${tx(geometry.sides.bottom)} ${ty(geometry.sides.left)} L ${tx(0)} ${ty(geometry.sides.left)} Z`} fill={filmStyle.color} opacity={filmStyle.opacity} />
         </>
       ) : (
-        <polygon
-          points={points.map((p) => `${tx(p.x)},${ty(p.y)}`).join(' ')}
-          fill={filmStyle.color}
-          fillOpacity={filmStyle.opacity}
-          stroke={kantColor}
-          strokeWidth="3"
-        />
+        <polygon points={points.map((p) => `${tx(p.x)},${ty(p.y)}`).join(' ')} fill={filmStyle.color} fillOpacity={filmStyle.opacity} stroke={kantColor} strokeWidth="3" />
       )}
 
-      {Object.entries(segments).map(([side, [a, b]]) => {
-        const length = geometry.sides[side]
-        if (!length) return null
-        return (
-          <text key={`${side}-label`} x={(tx(a.x) + tx(b.x)) / 2} y={(ty(a.y) + ty(b.y)) / 2 - 8} className="fill-slate-700 text-[10px]" textAnchor="middle">
-            {`${SIDE_LABELS[side]}: ${Math.round(length)} мм`}
-          </text>
-        )
-      })}
-
-      {angleMarks.map((corner, idx) => {
-        const map = { topLeft: points[0], topRight: points[1], bottomRight: points[2], bottomLeft: points[3] }
-        const p = map[corner]
-        if (!p) return null
-        return <rect key={idx} x={tx(p.x) + 4} y={ty(p.y) + 4} width="10" height="10" fill="none" stroke="#334155" strokeWidth="1.5" />
-      })}
-
-      {Object.entries(fastenersBySide).map(([side, fastenerData]) => {
-        const seg = segments[side]
-        if (!seg) return null
-        const [a, b] = seg
-        const sideLength = geometry.sides[side]
-        if (!sideLength || fastenerData.count === 0) return null
-
-        return fastenerData.points.map((mmPos, i) => {
-          const t = mmPos / sideLength
+      {Object.entries(seg).map(([side, [a, b]]) => {
+        const current = fastenersBySide[side]
+        if (!current?.pointsMm?.length) return null
+        const len = geometry.sides[side]
+        return current.pointsMm.map((p, idx) => {
+          const t = p / len
           const x = tx(a.x + (b.x - a.x) * t)
           const y = ty(a.y + (b.y - a.y) * t)
-          const type = i === 0 || i === fastenerData.points.length - 1 ? 'grommets' : fastenerData.type
-
-          if (type === 'grommets') {
-            return <circle key={`${side}-${i}`} cx={x} cy={y} r="4" fill="#0ea5e9" />
-          }
-          if (type === 'locks') {
-            return <rect key={`${side}-${i}`} x={x - 4} y={y - 4} width="8" height="8" fill="#f97316" />
-          }
-          return <polygon key={`${side}-${i}`} points={`${x},${y - 5} ${x + 5},${y + 5} ${x - 5},${y + 5}`} fill="#16a34a" />
+          const effective = idx === 0 || idx === current.pointsMm.length - 1 ? 'grommets' : current.type
+          if (effective === 'grommets') return <circle key={`${side}-${idx}`} cx={x} cy={y} r="3.8" fill="#0284c7" />
+          if (effective === 'locks') return <rect key={`${side}-${idx}`} x={x - 4} y={y - 4} width="8" height="8" fill="#ea580c" />
+          return <polygon key={`${side}-${idx}`} points={`${x},${y - 5} ${x + 5},${y + 5} ${x - 5},${y + 5}`} fill="#16a34a" />
         })
       })}
     </svg>
@@ -273,239 +126,294 @@ function Drawing({ shape, geometry, filmStyle, kantColor, fastenersBySide }) {
 
 export default function App() {
   const [shape, setShape] = useState('rectangle')
-  const [dimensions, setDimensions] = useState({
-    width: 2000,
-    height: 1500,
-    top: 1800,
-    right: 1400,
-    bottom: 2200,
-    left: 1400,
-    a: 2000,
-    b: 1700,
-    c: 1700,
-  })
-  const [rightAngles, setRightAngles] = useState({ topLeft: true, topRight: true, bottomRight: true, bottomLeft: true })
+  const [dims, setDims] = useState({ width: 2000, height: 1500, top: 1800, right: 1400, bottom: 2200, left: 1400, a: 2000, b: 1700, c: 1700 })
+  const [corners, setCorners] = useState({ topLeft: true, topRight: true, bottomRight: true, bottomLeft: true })
   const [sideSettings, setSideSettings] = useState(initialSideSettings)
-  const [filmType, setFilmType] = useState(FILM_TYPES[0].id)
-  const [kantColorId, setKantColorId] = useState(KANT_COLOR_OPTIONS[0].id)
-  const [options, setOptions] = useState({
-    bottomWeight: false,
-    topDrip: false,
-    rollStraps: false,
+  const [filmType, setFilmType] = useState('transparent')
+  const [kantColorId, setKantColorId] = useState('brown-gloss')
+  const [options, setOptions] = useState({ bottomWeight: false, topDrip: false, rollStraps: false })
+  const [createdBy, setCreatedBy] = useState('Менеджер')
+  const [notes, setNotes] = useState('')
+  const [additionalMaterials, setAdditionalMaterials] = useState([{ sku: '', name: '', quantity: 0, unit: 'шт', unitPrice: 0 }])
+  const [laborCost, setLaborCost] = useState(0)
+  const [markupPercent, setMarkupPercent] = useState(30)
+  const [calculation, setCalculation] = useState(null)
+  const [orderId, setOrderId] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const productionRef = useRef(null)
+
+  const selectedFilm = FILM_TYPES.find((f) => f.id === filmType) || FILM_TYPES[0]
+  const selectedKantColor = KANT_COLOR_OPTIONS.find((k) => k.id === kantColorId) || KANT_COLOR_OPTIONS[0]
+  const geometry = useMemo(() => ({ ...calcAreaAndPerimeter(shape, dims), dims }), [shape, dims])
+
+  const fastenersBySide = useMemo(
+    () => Object.fromEntries(Object.entries(geometry.sides).map(([side, length]) => [side, calcSideFasteners(length, sideSettings[side]?.fastener || 'none')])),
+    [geometry.sides, sideSettings],
+  )
+
+  const rollStrapsCount = useMemo(() => {
+    if (!options.rollStraps) return 0
+    const widthMm = shape === 'trapezoid' ? Number(dims.bottom || 0) : Number(dims.width || dims.a || 0)
+    return Math.ceil(widthMm / 1500) * 2
+  }, [options.rollStraps, shape, dims.bottom, dims.width, dims.a])
+
+  const validationErrors = useMemo(() => {
+    const fields = SHAPE_FIELDS[shape]
+    return fields.filter((key) => Number(dims[key] || 0) <= 0)
+  }, [shape, dims])
+
+  const areaWarning = geometry.areaM2 < 1
+
+  const buildOrderPayload = () => ({
+    order_id: orderId || `SW-${Date.now()}`,
+    created_by: createdBy,
+    created_at: new Date().toISOString(),
+    rules_version: RULES_VERSION,
+    shape,
+    dims,
+    corners,
+    sideSettings,
+    colors: {
+      film: { id: selectedFilm.id, label: selectedFilm.label },
+      kant: selectedKantColor,
+    },
+    options,
+    rollStrapsCount,
+    additionalMaterials,
+    labor_cost: Number(laborCost || 0),
+    markup_percent: Number(markupPercent || 0),
+    notes,
   })
 
-  const selectedKantColor = useMemo(
-    () => KANT_COLOR_OPTIONS.find((option) => option.id === kantColorId) ?? KANT_COLOR_OPTIONS[0],
-    [kantColorId],
-  )
-  const selectedFilm = useMemo(
-    () => FILM_TYPES.find((option) => option.id === filmType) ?? FILM_TYPES[0],
-    [filmType],
-  )
-
-  const geometry = useMemo(() => getGeometry(shape, dimensions, rightAngles), [shape, dimensions, rightAngles])
-
-  const fastenersBySide = useMemo(() => {
-    return Object.fromEntries(
-      Object.entries(geometry.sides).map(([side, length]) => [side, calcSideFasteners(length, sideSettings[side]?.fastener || 'none')]),
-    )
-  }, [geometry.sides, sideSettings])
-
-  const strapsCount = useMemo(() => {
-    if (!options.rollStraps) return 0
-    const widthMm = shape === 'trapezoid' ? readNum(dimensions.bottom) : readNum(dimensions.width || dimensions.a)
-    return Math.ceil(mmToM(widthMm) / 1.5) * 2
-  }, [dimensions, options.rollStraps, shape])
-
-  const result = useMemo(() => {
-    const minArea = Math.max(1, geometry.areaM2)
-    return {
-      area: minArea,
-      perimeter: geometry.perimeterM,
+  const calculateSpecificationAndPrice = async () => {
+    if (validationErrors.length > 0) return
+    const payload = buildOrderPayload()
+    setLoading(true)
+    try {
+      const draft = await createOrderDraft(payload)
+      setOrderId(draft.order_id)
+      const calculated = await calculateOrder(draft.order_id, payload)
+      setCalculation(calculated)
+    } finally {
+      setLoading(false)
     }
-  }, [geometry])
+  }
 
-  const exportPayload = useMemo(
-    () => ({
-      timestamp: new Date().toISOString(),
-      shape,
-      dimensions,
-      rightAngles,
-      colors: {
-        film: { type: selectedFilm.id, label: selectedFilm.label },
-        kant: { id: selectedKantColor.id, label: selectedKantColor.label, hex: selectedKantColor.color },
-      },
-      sideSettings,
-      options,
-      metrics: {
-        areaM2: Number(result.area.toFixed(2)),
-        perimeterM: Number(result.perimeter.toFixed(2)),
-      },
-      fastenersBySide: Object.fromEntries(
-        Object.entries(fastenersBySide).map(([side, data]) => [side, { type: data.type, count: data.count, stepMm: Number(data.step.toFixed(2)) }]),
-      ),
-      rollStrapsCount: strapsCount,
-    }),
-    [dimensions, fastenersBySide, options, result, rightAngles, selectedFilm, selectedKantColor, shape, sideSettings, strapsCount],
-  )
+  const generateProductionSheet = async () => {
+    if (!calculation) return
+    const element = productionRef.current
+    if (!element) return
 
-  const handleExport = () => {
-    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' })
+    const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')])
+    const canvas = await html2canvas(element)
+    const img = canvas.toDataURL('image/png')
+    const pdf = new jsPDF('p', 'mm', 'a4')
+    const width = 190
+    const height = (canvas.height * width) / canvas.width
+    pdf.addImage(img, 'PNG', 10, 10, width, height)
+    pdf.save(`production-sheet-${orderId || 'draft'}.pdf`)
+  }
+
+  const generateWriteOffForm = async () => {
+    if (!calculation) return
+    const html = `
+      <html><head><meta charset="utf-8"><title>Write-off</title></head><body>
+      <h2>Форма списания: ${calculation.order_id}</h2>
+      <table border="1" cellspacing="0" cellpadding="6">
+      <tr><th>SKU</th><th>Наименование</th><th>Кол-во</th><th>Ед.</th><th>Склад</th><th>Подпись</th></tr>
+      ${calculation.materials
+        .map((m) => `<tr><td>${m.sku}</td><td>${m.name}</td><td>${m.quantity}</td><td>${m.unit}</td><td>Склад №1</td><td></td></tr>`)
+        .join('')}
+      </table></body></html>
+    `
+    const blob = new Blob([html], { type: 'text/html' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `soft-window-${Date.now()}.json`
+    a.download = `writeoff-${orderId || 'draft'}.html`
     a.click()
     URL.revokeObjectURL(url)
   }
 
-  const fieldLabels = {
-    width: 'Ширина (мм)',
-    height: shape === 'arch' ? 'Радиус (мм)' : 'Высота (мм)',
-    top: 'Верхняя сторона (мм)',
-    right: 'Правая сторона (мм)',
-    bottom: 'Нижняя сторона (мм)',
-    left: 'Левая сторона (мм)',
-    a: 'Сторона A (мм)',
-    b: 'Сторона B (мм)',
-    c: 'Сторона C (мм)',
+  const downloadJson = async () => {
+    const source = orderId ? await getOrder(orderId) : null
+    const data = source || {
+      ...buildOrderPayload(),
+      attachments: fastenersBySide,
+      materials: calculation?.materials || [],
+      specification: calculation?.specification || [],
+      cost: calculation?.cost || null,
+      production_sheet: { generated: false },
+      writeoff: { generated: false },
+    }
+
+    const exportData = {
+      order_id: data.order_id,
+      created_by: data.created_by,
+      created_at: data.created_at,
+      rules_version: data.rules_version,
+      shape: data.shape,
+      dims: data.dims,
+      corners: data.corners,
+      attachments: data.attachments,
+      materials: data.materials,
+      specification: data.specification,
+      cost: data.cost,
+      production_sheet: {
+        generated: Boolean(calculation),
+        fasteners_layout: data.attachments,
+      },
+      writeoff: {
+        generated: Boolean(calculation),
+        items: data.materials,
+      },
+      notes: data.notes,
+    }
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `order-${orderId || 'draft'}.json`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
-    <main className="mx-auto max-w-7xl p-4 md:p-6">
-      <h1 className="mb-4 text-2xl font-bold text-slate-900">Калькулятор «Мягкие окна»</h1>
+    <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
+      <h1 className="text-2xl font-bold">Калькулятор «Мягкие окна»</h1>
+
       <div className="grid gap-4 lg:grid-cols-3">
-        <section className="space-y-4 rounded-xl bg-white p-4 shadow">
-          <div>
-            <label className="mb-1 block text-sm font-semibold">Форма изделия</label>
-            <select className="w-full rounded border p-2" value={shape} onChange={(e) => setShape(e.target.value)}>
+        <section className="space-y-3 rounded-xl bg-white p-4 shadow">
+          <label className="block text-sm">Форма
+            <select className="mt-1 w-full rounded border p-2" value={shape} onChange={(e) => setShape(e.target.value)}>
               <option value="rectangle">Прямоугольник</option>
               <option value="trapezoid">Трапеция</option>
               <option value="arch">Арка (полукруг)</option>
               <option value="triangle">Треугольник</option>
             </select>
-          </div>
+          </label>
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="grid gap-2 sm:grid-cols-2">
             {SHAPE_FIELDS[shape].map((field) => (
               <label key={field} className="text-sm">
-                {fieldLabels[field]}
-                <input
-                  type="number"
-                  min="0"
-                  className="mt-1 w-full rounded border p-2"
-                  value={dimensions[field]}
-                  onChange={(e) => setDimensions((prev) => ({ ...prev, [field]: Math.max(0, Number(e.target.value || 0)) }))}
-                />
+                {field} (мм)
+                <input type="number" min="1" className={`mt-1 w-full rounded border p-2 ${validationErrors.includes(field) ? 'border-rose-500' : ''}`} value={dims[field]} onChange={(e) => setDims((p) => ({ ...p, [field]: Number(e.target.value || 0) }))} />
               </label>
             ))}
           </div>
+          {!!validationErrors.length && <p className="text-sm text-rose-600">Заполните корректно размеры: {validationErrors.join(', ')}</p>}
+          {areaWarning && <p className="text-sm text-amber-600">Площадь менее 1 м² — в расчёте будет применён минимум 1 м².</p>}
 
-          {shape !== 'triangle' && (
-            <div>
-              <p className="mb-2 text-sm font-semibold">Прямые углы (90°)</p>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                {Object.keys(rightAngles).map((corner) => (
-                  <label key={corner} className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={rightAngles[corner]}
-                      onChange={(e) => setRightAngles((prev) => ({ ...prev, [corner]: e.target.checked }))}
-                    />
-                    {corner}
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
+          <label className="block text-sm">Тип плёнки
+            <select className="mt-1 w-full rounded border p-2" value={filmType} onChange={(e) => setFilmType(e.target.value)}>
+              {FILM_TYPES.map((film) => <option key={film.id} value={film.id}>{film.label}</option>)}
+            </select>
+          </label>
+          <label className="block text-sm">Цвет канта
+            <select className="mt-1 w-full rounded border p-2" value={kantColorId} onChange={(e) => setKantColorId(e.target.value)}>
+              {KANT_COLOR_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+            </select>
+          </label>
+
+          <label className="block text-sm">Менеджер
+            <input className="mt-1 w-full rounded border p-2" value={createdBy} onChange={(e) => setCreatedBy(e.target.value)} />
+          </label>
         </section>
 
         <section className="space-y-3 rounded-xl bg-white p-4 shadow">
-          <h2 className="text-lg font-semibold">Настройки канта и креплений</h2>
+          <h2 className="font-semibold">Кант и крепления</h2>
           {Object.entries(SIDE_LABELS).map(([side, label]) => (
             <div key={side} className="rounded border p-2">
               <p className="text-sm font-medium">{label}</p>
-              <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
-                <select
-                  className="rounded border p-1"
-                  value={sideSettings[side].kant}
-                  onChange={(e) => setSideSettings((prev) => ({ ...prev, [side]: { ...prev[side], kant: Number(e.target.value) } }))}
-                >
-                  {KANT_OPTIONS.map((k) => (
-                    <option key={k} value={k}>{`Кант ${k} мм`}</option>
-                  ))}
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <select className="rounded border p-1 text-sm" value={sideSettings[side].kant} onChange={(e) => setSideSettings((p) => ({ ...p, [side]: { ...p[side], kant: Number(e.target.value) } }))}>
+                  {KANT_OPTIONS.map((k) => <option key={k} value={k}>{`Кант ${k} мм`}</option>)}
                 </select>
-                <select
-                  className="rounded border p-1"
-                  value={sideSettings[side].fastener}
-                  onChange={(e) => setSideSettings((prev) => ({ ...prev, [side]: { ...prev[side], fastener: e.target.value } }))}
-                >
-                  {FASTENER_TYPES.map((f) => (
-                    <option key={f} value={f}>
-                      {{ none: 'Без креплений', grommets: 'Люверсы', locks: 'Замки', straps: 'Ремни' }[f]}
-                    </option>
-                  ))}
+                <select className="rounded border p-1 text-sm" value={sideSettings[side].fastener} onChange={(e) => setSideSettings((p) => ({ ...p, [side]: { ...p[side], fastener: e.target.value } }))}>
+                  {FASTENER_TYPES.map((t) => <option key={t} value={t}>{{ none: 'Без креплений', grommets: 'Люверсы', locks: 'Замки', straps: 'Ремни' }[t]}</option>)}
                 </select>
               </div>
             </div>
           ))}
-
-          <div className="grid grid-cols-1 gap-2 text-sm">
-            <label>
-              Тип плёнки
-              <select className="mt-1 w-full rounded border p-2" value={filmType} onChange={(e) => setFilmType(e.target.value)}>
-                {FILM_TYPES.map((film) => (
-                  <option key={film.id} value={film.id}>
-                    {film.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Цвет канта
-              <select className="mt-1 w-full rounded border p-2" value={kantColorId} onChange={(e) => setKantColorId(e.target.value)}>
-                {KANT_COLOR_OPTIONS.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
 
           <div className="space-y-1 text-sm">
             <label className="flex gap-2"><input type="checkbox" checked={options.bottomWeight} onChange={(e) => setOptions((p) => ({ ...p, bottomWeight: e.target.checked }))} />Отвес снизу</label>
             <label className="flex gap-2"><input type="checkbox" checked={options.topDrip} onChange={(e) => setOptions((p) => ({ ...p, topDrip: e.target.checked }))} />Отлив сверху</label>
             <label className="flex gap-2"><input type="checkbox" checked={options.rollStraps} onChange={(e) => setOptions((p) => ({ ...p, rollStraps: e.target.checked }))} />Ремни фиксации (в скрутке)</label>
           </div>
+
+          <h3 className="font-semibold">Дополнительные материалы</h3>
+          {additionalMaterials.map((item, idx) => (
+            <div key={idx} className="grid grid-cols-4 gap-1 text-xs">
+              <input className="rounded border p-1" placeholder="SKU" value={item.sku} onChange={(e) => setAdditionalMaterials((p) => p.map((v, i) => i === idx ? { ...v, sku: e.target.value } : v))} />
+              <input className="rounded border p-1" placeholder="Наименование" value={item.name} onChange={(e) => setAdditionalMaterials((p) => p.map((v, i) => i === idx ? { ...v, name: e.target.value } : v))} />
+              <input type="number" className="rounded border p-1" placeholder="Кол-во" value={item.quantity} onChange={(e) => setAdditionalMaterials((p) => p.map((v, i) => i === idx ? { ...v, quantity: Number(e.target.value || 0) } : v))} />
+              <input type="number" className="rounded border p-1" placeholder="Цена" value={item.unitPrice} onChange={(e) => setAdditionalMaterials((p) => p.map((v, i) => i === idx ? { ...v, unitPrice: Number(e.target.value || 0) } : v))} />
+            </div>
+          ))}
+          <button className="rounded bg-slate-200 px-2 py-1 text-sm" onClick={() => setAdditionalMaterials((p) => [...p, { sku: '', name: '', quantity: 0, unit: 'шт', unitPrice: 0 }])}>+ Добавить материал</button>
         </section>
 
         <section className="space-y-3 rounded-xl bg-white p-4 shadow">
-          <h2 className="text-lg font-semibold">Чертёж и результат</h2>
-          <Drawing
-            shape={shape}
-            geometry={geometry}
-            filmStyle={selectedFilm}
-            kantColor={selectedKantColor.color}
-            fastenersBySide={fastenersBySide}
-          />
+          <h2 className="font-semibold">Чертёж</h2>
+          <Drawing shape={shape} geometry={geometry} filmStyle={selectedFilm} kantColor={selectedKantColor.color} fastenersBySide={fastenersBySide} />
+          <p className="text-sm">Площадь: <strong>{geometry.billableAreaM2.toFixed(2)} м²</strong> | Периметр: <strong>{geometry.perimeterM.toFixed(2)} м</strong></p>
 
-          <div className="rounded bg-slate-100 p-3 text-sm">
-            <p>Площадь: <strong>{result.area.toFixed(2)} м²</strong></p>
-            <p>Периметр: <strong>{result.perimeter.toFixed(2)} м</strong></p>
-            {options.rollStraps && <p>Ремней фиксации: <strong>{strapsCount} шт.</strong></p>}
-            <div className="mt-2 space-y-1">
-              {Object.entries(fastenersBySide).map(([side, data]) => (
-                <p key={side}>{SIDE_LABELS[side]}: {data.count} шт. ({data.type})</p>
-              ))}
-            </div>
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <label>Materials cost
+              <input className="mt-1 w-full rounded border bg-slate-100 p-2" value={calculation?.cost?.materialsCost ?? 0} readOnly />
+            </label>
+            <label>Labor cost
+              <input type="number" className="mt-1 w-full rounded border p-2" value={laborCost} onChange={(e) => setLaborCost(Number(e.target.value || 0))} />
+            </label>
+            <label>Markup %
+              <input type="number" className="mt-1 w-full rounded border p-2" value={markupPercent} onChange={(e) => setMarkupPercent(Number(e.target.value || 0))} />
+            </label>
+            <label>Total price
+              <input className="mt-1 w-full rounded border bg-slate-100 p-2" value={calculation?.cost?.totalPrice ?? 0} readOnly />
+            </label>
           </div>
 
-          <button className="w-full rounded bg-slate-900 p-2 font-medium text-white hover:bg-slate-700" onClick={handleExport}>
-            Скачать JSON
-          </button>
+          <label className="block text-sm">Notes
+            <textarea className="mt-1 w-full rounded border p-2" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </label>
+
+          <div className="grid gap-2">
+            <button className="rounded bg-slate-900 p-2 text-white" onClick={calculateSpecificationAndPrice} disabled={loading}>{loading ? 'Calculating...' : 'Calculate specification & price'}</button>
+            <button className="rounded bg-indigo-700 p-2 text-white disabled:opacity-50" onClick={generateProductionSheet} disabled={!calculation}>Generate Production Sheet</button>
+            <button className="rounded bg-emerald-700 p-2 text-white disabled:opacity-50" onClick={generateWriteOffForm} disabled={!calculation}>Generate Write-off Form</button>
+            <button className="rounded bg-slate-700 p-2 text-white" onClick={downloadJson}>Download JSON</button>
+          </div>
         </section>
       </div>
+
+      {calculation && (
+        <section ref={productionRef} className="space-y-3 rounded-xl bg-white p-4 shadow">
+          <h2 className="text-xl font-semibold">Production sheet</h2>
+          <p>Order: {calculation.order_id} | Date: {new Date(calculation.created_at).toLocaleString()}</p>
+          <Drawing shape={shape} geometry={geometry} filmStyle={selectedFilm} kantColor={selectedKantColor.color} fastenersBySide={calculation.attachments} />
+          <table className="w-full border text-sm">
+            <thead className="bg-slate-100"><tr><th className="border p-1">Сторона</th><th className="border p-1">Тип</th><th className="border p-1">Кол-во</th><th className="border p-1">Шаг, мм</th></tr></thead>
+            <tbody>
+              {Object.entries(calculation.attachments).map(([side, item]) => (
+                <tr key={side}><td className="border p-1">{SIDE_LABELS[side]}</td><td className="border p-1">{item.type}</td><td className="border p-1">{item.count}</td><td className="border p-1">{Number(item.stepMm || 0).toFixed(1)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+          <h3 className="font-semibold">Specification</h3>
+          <table className="w-full border text-sm">
+            <thead className="bg-slate-100"><tr><th className="border p-1">SKU</th><th className="border p-1">Name</th><th className="border p-1">Qty</th><th className="border p-1">Price</th><th className="border p-1">Total</th></tr></thead>
+            <tbody>
+              {calculation.specification.map((line) => (
+                <tr key={`${line.sku}-${line.name}`}><td className="border p-1">{line.sku}</td><td className="border p-1">{line.name}</td><td className="border p-1">{line.quantity}</td><td className="border p-1">{line.unitPrice}</td><td className="border p-1">{line.lineTotal}</td></tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-sm">Notes: {notes || '—'}</p>
+        </section>
+      )}
     </main>
   )
 }

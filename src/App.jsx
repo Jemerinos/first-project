@@ -4,6 +4,7 @@ import TrapezoidInput from './components/TrapezoidInput'
 import SVGCanvas from './components/SVGCanvas'
 import { computeFastenersOnSegment } from './lib/fasteners.v1'
 import {
+  computeRightTriangleFromCatheti,
   computeTriangleFromBaseHeight,
   computeTriangleFromSides,
   computeTrapezoid,
@@ -11,7 +12,12 @@ import {
 import { assembleMaterials, estimateCosts, RULES_VERSION } from './lib/calculator.rules.v1'
 
 const SIDE_NAMES = ['A', 'B', 'C', 'D']
-const FASTENER_TYPES = ['none', 'grommets', 'locks', 'straps']
+const FASTENER_OPTIONS = {
+  none: 'Без креплений',
+  grommets: 'Люверсы',
+  locks: 'Замки',
+  straps: 'Ремни',
+}
 
 function geometryFromRectangle(width, height) {
   if (width <= 0 || height <= 0) return { valid: false, reason: 'Ширина и высота должны быть больше 0.' }
@@ -29,12 +35,23 @@ function geometryFromRectangle(width, height) {
   }
 }
 
+function rotateTriangleToRightAngle(vertices, rightAngle) {
+  if (!vertices || vertices.length !== 3) return vertices
+  const map = { A: 0, B: 1, C: 2 }
+  const rightIndex = map[rightAngle] ?? 2
+  if (rightIndex === 0) return vertices
+  if (rightIndex === 1) return [vertices[1], vertices[2], vertices[0]]
+  return [vertices[2], vertices[0], vertices[1]]
+}
+
 export default function App() {
   const [shape, setShape] = useState('rectangle')
   const [rect, setRect] = useState({ width: 2000, height: 1500 })
   const [triangleMode, setTriangleMode] = useState('sides')
+  const [triangleRightAngle, setTriangleRightAngle] = useState('A')
   const [triangleSides, setTriangleSides] = useState({ a: 3000, b: 4000, c: 5000 })
   const [triangleBaseHeight, setTriangleBaseHeight] = useState({ base: 3000, height: 2000 })
+  const [triangleCatheti, setTriangleCatheti] = useState({ width: 3000, height: 4000 })
   const [trapezoid, setTrapezoid] = useState({ baseA: 2000, baseB: 2600, left: 1500, right: 1700 })
   const [trapezoidFlags, setTrapezoidFlags] = useState({ topLeft: false, topRight: false, bottomRight: false, bottomLeft: false })
 
@@ -45,15 +62,35 @@ export default function App() {
 
   const geometryResult = useMemo(() => {
     if (shape === 'triangle') {
-      return triangleMode === 'sides'
-        ? computeTriangleFromSides(triangleSides.a, triangleSides.b, triangleSides.c)
-        : computeTriangleFromBaseHeight(triangleBaseHeight.base, triangleBaseHeight.height)
+      const baseResult =
+        triangleMode === 'sides'
+          ? computeTriangleFromSides(triangleSides.a, triangleSides.b, triangleSides.c)
+          : triangleMode === 'baseHeight'
+            ? computeTriangleFromBaseHeight(triangleBaseHeight.base, triangleBaseHeight.height)
+            : computeRightTriangleFromCatheti(triangleCatheti.width, triangleCatheti.height)
+
+      if (!baseResult.valid) return baseResult
+
+      return {
+        ...baseResult,
+        vertices: rotateTriangleToRightAngle(baseResult.vertices, triangleRightAngle),
+      }
     }
     if (shape === 'trapezoid') {
       return computeTrapezoid(trapezoid.baseA, trapezoid.baseB, trapezoid.left, trapezoid.right, trapezoidFlags)
     }
     return geometryFromRectangle(Number(rect.width), Number(rect.height))
-  }, [shape, triangleMode, triangleSides, triangleBaseHeight, trapezoid, trapezoidFlags, rect])
+  }, [
+    shape,
+    triangleMode,
+    triangleSides,
+    triangleBaseHeight,
+    triangleCatheti,
+    triangleRightAngle,
+    trapezoid,
+    trapezoidFlags,
+    rect,
+  ])
 
   const fasteners = useMemo(() => {
     if (!geometryResult.valid) return []
@@ -68,7 +105,13 @@ export default function App() {
       const start = vertices[i]
       const end = vertices[(i + 1) % sideCount]
       const segmentFasteners = computeFastenersOnSegment(start, end, type)
-      list.push({ side, type, count: segmentFasteners.count, step_mm: segmentFasteners.step_mm, placements: segmentFasteners.placements })
+      list.push({
+        side,
+        type,
+        count: segmentFasteners.count,
+        step_mm: segmentFasteners.step_mm,
+        placements: segmentFasteners.placements,
+      })
     }
     return list
   }, [geometryResult, sideFasteners])
@@ -82,13 +125,7 @@ export default function App() {
     }
 
     const fastenersBySide = Object.fromEntries(
-      fasteners.map((side) => [
-        side.side,
-        {
-          type: side.type,
-          count: side.count,
-        },
-      ]),
+      fasteners.map((side) => [side.side, { type: side.type, count: side.count }]),
     )
 
     const materials = assembleMaterials({
@@ -160,11 +197,15 @@ export default function App() {
             <TriangleInput
               mode={triangleMode}
               onModeChange={setTriangleMode}
+              rightAngle={triangleRightAngle}
+              onRightAngleChange={setTriangleRightAngle}
               sides={triangleSides}
               baseHeight={triangleBaseHeight}
+              catheti={triangleCatheti}
               errors={{}}
               onSidesChange={(k, v) => setTriangleSides((p) => ({ ...p, [k]: v }))}
               onBaseHeightChange={(k, v) => setTriangleBaseHeight((p) => ({ ...p, [k]: v }))}
+              onCathetiChange={(k, v) => setTriangleCatheti((p) => ({ ...p, [k]: v }))}
             />
           )}
 
@@ -186,7 +227,7 @@ export default function App() {
           {SIDE_NAMES.map((side) => (
             <label key={side} className="block text-sm">Сторона {side}
               <select className="mt-1 w-full rounded border p-2" value={sideFasteners[side]} onChange={(e) => setSideFasteners((p) => ({ ...p, [side]: e.target.value }))}>
-                {FASTENER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                {Object.entries(FASTENER_OPTIONS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             </label>
           ))}
@@ -206,12 +247,29 @@ export default function App() {
 
         <section className="space-y-3 rounded-xl bg-white p-4 shadow">
           <h2 className="font-semibold">SVG-чертёж</h2>
-          <SVGCanvas vertices={geometryResult.vertices || []} fasteners={fasteners} />
+          <SVGCanvas vertices={geometryResult.vertices || []} fasteners={fasteners} triangleRightAngle={shape === 'triangle' ? triangleRightAngle : undefined} />
           {geometryResult.valid && (
-            <p className="text-sm">
-              Площадь: {(geometryResult.area_mm2 / 1_000_000).toFixed(3)} м², Периметр: {(geometryResult.perimeter_mm / 1000).toFixed(3)} м
-            </p>
+            <p className="text-sm">Площадь: {(geometryResult.area_mm2 / 1_000_000).toFixed(3)} м², Периметр: {(geometryResult.perimeter_mm / 1000).toFixed(3)} м</p>
           )}
+
+          <h3 className="pt-2 font-semibold">Расход фурнитуры</h3>
+          <table className="w-full border text-sm">
+            <thead className="bg-slate-100"><tr><th className="border p-1">Сторона</th><th className="border p-1">Тип</th><th className="border p-1">Кол-во</th><th className="border p-1">Шаг, мм</th></tr></thead>
+            <tbody>
+              {fasteners.length === 0 ? (
+                <tr><td className="border p-1 text-center" colSpan="4">Крепления не выбраны</td></tr>
+              ) : (
+                fasteners.map((item) => (
+                  <tr key={`${item.side}-${item.type}`}>
+                    <td className="border p-1">{item.side}</td>
+                    <td className="border p-1">{FASTENER_OPTIONS[item.type]}</td>
+                    <td className="border p-1">{item.count}</td>
+                    <td className="border p-1">{item.step_mm.toFixed(1)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </section>
       </div>
 

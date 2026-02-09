@@ -92,6 +92,35 @@ export function computeTriangleFromBaseHeight(base_mm, height_mm) {
   }
 }
 
+export function computeRightTriangleFromCatheti(width_mm, height_mm) {
+  const width = Number(width_mm)
+  const height = Number(height_mm)
+  if (!(width > 0 && height > 0)) {
+    return { valid: false, reason: 'Катеты должны быть больше 0.' }
+  }
+
+  const v0 = { x: 0, y: 0 }
+  const v1 = { x: width, y: 0 }
+  const v2 = { x: 0, y: height }
+  const vertices = [v0, v1, v2]
+  const c = dist(v0, v1)
+  const b = dist(v0, v2)
+  const a = dist(v1, v2)
+
+  return {
+    valid: true,
+    vertices,
+    sides: { a, b, c },
+    angles_deg: {
+      A: lawOfCosinesAngle(a, b, c),
+      B: lawOfCosinesAngle(b, a, c),
+      C: lawOfCosinesAngle(c, a, b),
+    },
+    area_mm2: shoelaceArea(vertices),
+    perimeter_mm: a + b + c,
+  }
+}
+
 const quadrilateralFeasible = (sides) => {
   const sum = sides.reduce((acc, v) => acc + v, 0)
   return sides.every((v) => v > 0 && v < sum - v)

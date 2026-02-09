@@ -8,6 +8,31 @@ function midpoint(a, b) {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
 }
 
+function pointInPolygon(point, polygon) {
+  let inside = false
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x
+    const yi = polygon[i].y
+    const xj = polygon[j].x
+    const yj = polygon[j].y
+    const intersects = ((yi > point.y) !== (yj > point.y))
+      && (point.x < ((xj - xi) * (point.y - yi)) / ((yj - yi) || 1e-9) + xi)
+    if (intersects) inside = !inside
+  }
+  return inside
+}
+
+function inwardNormal(a, b, polygon) {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const len = Math.hypot(dx, dy) || 1
+  const nx = -dy / len
+  const ny = dx / len
+  const m = midpoint(a, b)
+  const plus = { x: m.x + nx * 10, y: m.y + ny * 10 }
+  return pointInPolygon(plus, polygon) ? { x: nx, y: ny } : { x: -nx, y: -ny }
+}
+
 export default function SVGCanvas({
   vertices = [],
   fasteners = [],
@@ -29,8 +54,13 @@ export default function SVGCanvas({
 
   const rightAngleIndex = triangleRightAngle === 'A' ? 0 : triangleRightAngle === 'B' ? 1 : triangleRightAngle === 'C' ? 2 : -1
   const hookMidY = minY + (maxY - minY) * 0.5
+
+  const width = maxX - minX
+  const edgeOffset = Math.min(200, Math.max(20, width / 2 - 1))
+  const hookStartX = minX + edgeOffset
+  const hookEndX = maxX - edgeOffset
   const hookXs = hooksEnabled && hooksCount > 0
-    ? Array.from({ length: hooksCount }, (_, i) => minX + ((i + 1) * (maxX - minX)) / (hooksCount + 1))
+    ? Array.from({ length: hooksCount }, (_, i) => hookStartX + (i * (hookEndX - hookStartX)) / Math.max(1, hooksCount - 1))
     : []
 
   return (
@@ -68,17 +98,29 @@ export default function SVGCanvas({
         <line key={`hook-${idx}`} x1={x} y1={minY} x2={x} y2={hookMidY} stroke="#334155" strokeWidth="5" strokeLinecap="butt" />
       ))}
 
-      {fasteners.flatMap((side) =>
-        side.placements.map((p, idx) => (
-          <circle
-            key={`${side.side}-${idx}`}
-            cx={p.x_mm}
-            cy={p.y_mm}
-            r="9"
-            fill={side.type === 'grommets' ? '#0284c7' : side.type === 'locks' ? '#ea580c' : '#16a34a'}
-          />
-        )),
-      )}
+      {fasteners.flatMap((side) => {
+        const sideIndex = SIDE_LABELS.indexOf(side.side)
+        if (sideIndex < 0 || sideIndex >= vertices.length) return []
+        const a = vertices[sideIndex]
+        const b = vertices[(sideIndex + 1) % vertices.length]
+        const kant = Number(sideKant[side.side] || 50)
+        const n = inwardNormal(a, b, vertices)
+        const offset = kant / 2
+
+        return side.placements.map((p, idx) => {
+          const x = p.x_mm + n.x * offset
+          const y = p.y_mm + n.y * offset
+          return (
+            <circle
+              key={`${side.side}-${idx}`}
+              cx={x}
+              cy={y}
+              r="9"
+              fill={side.type === 'grommets' ? '#0284c7' : side.type === 'locks' ? '#ea580c' : '#16a34a'}
+            />
+          )
+        })
+      })}
     </svg>
   )
 }

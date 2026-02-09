@@ -106,7 +106,9 @@ export default function App() {
     if (!hooksEnabled || !geometryResult.valid) return 0
     const xs = geometryResult.vertices.map((v) => v.x)
     const width = Math.max(...xs) - Math.min(...xs)
-    return Math.max(2, Math.ceil(width / 1500) * 2)
+    const usableBetweenEdgeHooks = Math.max(0, width - 400)
+    // Базово 2 крайних крючка (по 200 мм от края), далее +1 на каждые ~1.5 м между ними.
+    return 2 + Math.floor(usableBetweenEdgeHooks / 1500)
   }, [hooksEnabled, geometryResult])
 
   const fasteners = useMemo(() => {

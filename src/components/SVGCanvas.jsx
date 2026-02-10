@@ -33,6 +33,36 @@ function inwardNormal(a, b, polygon) {
   return pointInPolygon(plus, polygon) ? { x: nx, y: ny } : { x: -nx, y: -ny }
 }
 
+
+
+function normalize(v) {
+  const len = Math.hypot(v.x, v.y) || 1
+  return { x: v.x / len, y: v.y / len }
+}
+
+function cornerCenterPoint(vertices, index, sideKant) {
+  const n = vertices.length
+  const prevIndex = (index - 1 + n) % n
+  const nextIndex = (index + 1) % n
+  const prev = vertices[prevIndex]
+  const cur = vertices[index]
+  const next = vertices[nextIndex]
+
+  const nPrev = inwardNormal(prev, cur, vertices)
+  const nNext = inwardNormal(cur, next, vertices)
+  const bis = normalize({ x: nPrev.x + nNext.x, y: nPrev.y + nNext.y })
+
+  const sideNamePrev = SIDE_LABELS[prevIndex] || prevIndex
+  const sideNameCur = SIDE_LABELS[index] || index
+  const kPrev = Number(sideKant[sideNamePrev] || 50)
+  const kCur = Number(sideKant[sideNameCur] || 50)
+  const offset = (kPrev + kCur) / 4
+
+  return {
+    x: cur.x + bis.x * offset,
+    y: cur.y + bis.y * offset,
+  }
+}
 export default function SVGCanvas({
   vertices = [],
   fasteners = [],
@@ -98,29 +128,53 @@ export default function SVGCanvas({
         <line key={`hook-${idx}`} x1={x} y1={minY} x2={x} y2={hookMidY} stroke="#334155" strokeWidth="5" strokeLinecap="butt" />
       ))}
 
-      {fasteners.flatMap((side) => {
-        const sideIndex = SIDE_LABELS.indexOf(side.side)
-        if (sideIndex < 0 || sideIndex >= vertices.length) return []
-        const a = vertices[sideIndex]
-        const b = vertices[(sideIndex + 1) % vertices.length]
-        const kant = Number(sideKant[side.side] || 50)
-        const n = inwardNormal(a, b, vertices)
-        const offset = kant / 2
+      {(() => {
+        const rendered = []
+        const unique = new Set()
 
-        return side.placements.map((p, idx) => {
-          const x = p.x_mm + n.x * offset
-          const y = p.y_mm + n.y * offset
-          return (
-            <circle
-              key={`${side.side}-${idx}`}
-              cx={x}
-              cy={y}
-              r="9"
-              fill={side.type === 'grommets' ? '#0284c7' : side.type === 'locks' ? '#ea580c' : '#16a34a'}
-            />
-          )
+        fasteners.forEach((side) => {
+          const sideIndex = SIDE_LABELS.indexOf(side.side)
+          if (sideIndex < 0 || sideIndex >= vertices.length) return
+
+          const a = vertices[sideIndex]
+          const b = vertices[(sideIndex + 1) % vertices.length]
+          const kant = Number(sideKant[side.side] || 50)
+          const n = inwardNormal(a, b, vertices)
+          const offset = kant / 2
+
+          const startCorner = cornerCenterPoint(vertices, sideIndex, sideKant)
+          const endCorner = cornerCenterPoint(vertices, (sideIndex + 1) % vertices.length, sideKant)
+
+          side.placements.forEach((p, idx) => {
+            let x = p.x_mm + n.x * offset
+            let y = p.y_mm + n.y * offset
+
+            if (idx === 0) {
+              x = startCorner.x
+              y = startCorner.y
+            } else if (idx === side.placements.length - 1) {
+              x = endCorner.x
+              y = endCorner.y
+            }
+
+            const key = `${Math.round(x)}:${Math.round(y)}`
+            if (unique.has(key)) return
+            unique.add(key)
+
+            rendered.push(
+              <circle
+                key={`${side.side}-${idx}`}
+                cx={x}
+                cy={y}
+                r="9"
+                fill={side.type === 'grommets' ? '#0284c7' : side.type === 'locks' ? '#ea580c' : '#16a34a'}
+              />,
+            )
+          })
         })
-      })}
+
+        return rendered
+      })()}
     </svg>
   )
 }

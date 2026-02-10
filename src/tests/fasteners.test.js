@@ -53,18 +53,24 @@ describe('fasteners.v1', () => {
     expect(res[0].placements[0].isCorner).toBe(true)
   })
 
-  test('Замки имеют шаг в диапазоне 400-450 мм', () => {
-    const side = computeSidePlacements({ x: 0, y: 0 }, { x: 2000, y: 0 }, {
-      type: 'locks',
-      cornerOffset_mm: 25,
-      cantaWidth_mm: 50,
-      centroid: { x: 1000, y: 500 },
-    })
+  test('Замки идут от угла до угла с равным шагом в верхней границе диапазона', () => {
+    const vertices = [
+      { x: 0, y: 0 },
+      { x: 1000, y: 0 },
+      { x: 1000, y: 600 },
+      { x: 0, y: 600 },
+    ]
+    const sideConfig = {
+      A: { type: 'locks', cantaWidth_mm: 100 },
+      B: { type: 'none', cantaWidth_mm: 100 },
+      C: { type: 'none', cantaWidth_mm: 100 },
+      D: { type: 'none', cantaWidth_mm: 100 },
+    }
 
-    expect(side.step_mm).toBeGreaterThanOrEqual(400)
-    expect(side.step_mm).toBeLessThanOrEqual(450)
-    expect(side.placements[0].distFromStart_mm).toBe(25)
-    expect(side.placements[side.placements.length - 1].distFromStart_mm).toBe(1975)
+    const side = computePolygonFasteners(vertices, sideConfig, { cornerOffset_mm: 25, sideNames: ['A', 'B', 'C', 'D'] })[0]
+
+    expect(side.step_mm).toBe(450)
+    expect(side.placements.map((p) => p.distFromStart_mm)).toEqual([0, 450, 900])
   })
 
   test('Трапеция: корректные точки по всем сторонам', () => {

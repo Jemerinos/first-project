@@ -121,6 +121,29 @@ describe('fasteners.v1', () => {
     expect(unique.size).toBe(4)
   })
 
+
+  test('Шаг считается от угловых точек пересечения середины канта', () => {
+    const vertices = [
+      { x: 0, y: 0 },
+      { x: 1000, y: 0 },
+      { x: 1000, y: 600 },
+      { x: 0, y: 600 },
+    ]
+    const sideConfig = {
+      A: { type: 'grommets', cantaWidth_mm: 100 },
+      B: { type: 'grommets', cantaWidth_mm: 100 },
+      C: { type: 'grommets', cantaWidth_mm: 100 },
+      D: { type: 'grommets', cantaWidth_mm: 100 },
+    }
+    const res = computePolygonFasteners(vertices, sideConfig, { cornerOffset_mm: 25, sideNames: ['A', 'B', 'C', 'D'] })
+    const top = res.find((s) => s.side === 'A')
+
+    expect(top.placements[0].distFromStart_mm).toBe(0)
+    expect(top.placements[top.placements.length - 1].distFromStart_mm).toBe(top.length_mm)
+    expect(top.step_mm).toBeGreaterThanOrEqual(200)
+    expect(top.step_mm).toBeLessThanOrEqual(250)
+  })
+
   test('Арочная сторона: точки через getTotalLength/getPointAtLength', () => {
     const arcPath = makeQuarterArcPath(500)
     const res = computePathPlacements(arcPath, {

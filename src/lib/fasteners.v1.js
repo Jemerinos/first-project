@@ -149,6 +149,67 @@ function placementsFromLength(getPointAtDistance, getNormalAtDistance, length, o
   }
 }
 
+function placementsBetweenCornerAnchors(startPoint, endPoint, type) {
+  const rules = FASTENER_RULES[type]
+  const dx = endPoint.x - startPoint.x
+  const dy = endPoint.y - startPoint.y
+  const length = Math.hypot(dx, dy)
+
+  if (!rules || length <= 0) {
+    return {
+      type,
+      count: 0,
+      step_mm: 0,
+      length_mm: toMm(length || 0),
+      placements: [],
+      forced_step: false,
+      overlap_warning: false,
+    }
+  }
+
+  if (length < rules.step_min) {
+    const placements = [
+      { index: 0, isCorner: true, distFromStart_mm: 0, x_mm: toMm(startPoint.x), y_mm: toMm(startPoint.y) },
+      { index: 1, isCorner: true, distFromStart_mm: toMm(length), x_mm: toMm(endPoint.x), y_mm: toMm(endPoint.y) },
+    ]
+    return {
+      type,
+      count: placements.length,
+      step_mm: toMm(length),
+      length_mm: toMm(length),
+      placements,
+      forced_step: false,
+      overlap_warning: length < 1,
+      note: 'corner_to_corner_only',
+    }
+  }
+
+  const { intervals, step, forced_step } = calculateStepAndIntervals(length, rules.step_min, rules.step_max)
+  const placements = []
+
+  for (let i = 0; i <= intervals; i += 1) {
+    const distance = i * step
+    const t = clamp(distance / length, 0, 1)
+    placements.push({
+      index: i,
+      isCorner: i === 0 || i === intervals,
+      distFromStart_mm: toMm(distance),
+      x_mm: toMm(startPoint.x + dx * t),
+      y_mm: toMm(startPoint.y + dy * t),
+    })
+  }
+
+  return {
+    type,
+    count: placements.length,
+    step_mm: toMm(step),
+    length_mm: toMm(length),
+    placements,
+    forced_step,
+    overlap_warning: false,
+  }
+}
+
 export function computeCornerPlacement(V, Vprev, Vnext, cornerOffsetMm, cantaWidthMm, centroid) {
   const C = Math.max(0, Number(cornerOffsetMm || 0))
   const r = Math.max(0, Number(cantaWidthMm || 0)) / 2
@@ -174,7 +235,6 @@ export function computeCornerPlacement(V, Vprev, Vnext, cornerOffsetMm, cantaWid
     }
   }
 
-  // fallback_corner_placement: усреднение двух отложенных точек + смещение к центроиду
   const mid = { x: (V.x + d1.x * C + V.x + d2.x * C) / 2, y: (V.y + d1.y * C + V.y + d2.y * C) / 2 }
   const inward = normalize({ x: centroid.x - mid.x, y: centroid.y - mid.y })
   return {
@@ -262,6 +322,17 @@ export function computePolygonFasteners(vertices = [], sideConfig = {}, options 
   const cornerOffset = Number(options.cornerOffset_mm ?? 25)
   const sides = options.sideNames || ['A', 'B', 'C', 'D']
 
+  const cornerPoints = vertices.map((vertex, i) => {
+    const prevVertex = vertices[(i - 1 + vertices.length) % vertices.length]
+    const nextVertex = vertices[(i + 1) % vertices.length]
+    const prevSideName = sides[(i - 1 + sides.length) % sides.length] || `S${i}`
+    const thisSideName = sides[i] || `S${i + 1}`
+    const prevKant = Number((sideConfig[prevSideName] || {}).cantaWidth_mm || 50)
+    const thisKant = Number((sideConfig[thisSideName] || {}).cantaWidth_mm || 50)
+    const avgKant = (prevKant + thisKant) / 2
+    return computeCornerPlacement(vertex, prevVertex, nextVertex, cornerOffset, avgKant, centroid)
+  })
+
   const allSides = []
   for (let i = 0; i < vertices.length; i += 1) {
     const sideName = sides[i] || `S${i + 1}`
@@ -280,34 +351,26 @@ export function computePolygonFasteners(vertices = [], sideConfig = {}, options 
         cantaWidth_mm: cantaWidth,
         centroid,
       })
-      : computeSidePlacements(start, end, {
+      : placementsBetweenCornerAnchors(
+        { x: cornerPoints[i].x_mm, y: cornerPoints[i].y_mm },
+        { x: cornerPoints[(i + 1) % vertices.length].x_mm, y: cornerPoints[(i + 1) % vertices.length].y_mm },
         type,
-        cornerOffset_mm: cornerOffset,
-        cantaWidth_mm: cantaWidth,
-        centroid,
-      })
+      )
 
-    if (!segment.placements.length) continue
-
-    const prevVertex = vertices[(i - 1 + vertices.length) % vertices.length]
-    const nextVertex = vertices[(i + 2) % vertices.length]
-
-    const startCorner = computeCornerPlacement(start, prevVertex, end, cornerOffset, cantaWidth, centroid)
-    const nextSideName = sides[(i + 1) % vertices.length] || `S${((i + 1) % vertices.length) + 1}`
-    const endKant = Number((sideConfig[nextSideName] || {}).cantaWidth_mm || cantaWidth)
-    const endCorner = computeCornerPlacement(end, start, nextVertex, cornerOffset, endKant, centroid)
-
-    segment.placements[0] = {
-      ...segment.placements[0],
-      x_mm: startCorner.x_mm,
-      y_mm: startCorner.y_mm,
-      isCorner: true,
-    }
-    segment.placements[segment.placements.length - 1] = {
-      ...segment.placements[segment.placements.length - 1],
-      x_mm: endCorner.x_mm,
-      y_mm: endCorner.y_mm,
-      isCorner: true,
+    // Для кривых сторон принудительно фиксируем углы в точках пересечения середины канта.
+    if (cfg.pathGeometry && segment.placements.length >= 2) {
+      segment.placements[0] = {
+        ...segment.placements[0],
+        x_mm: cornerPoints[i].x_mm,
+        y_mm: cornerPoints[i].y_mm,
+        isCorner: true,
+      }
+      segment.placements[segment.placements.length - 1] = {
+        ...segment.placements[segment.placements.length - 1],
+        x_mm: cornerPoints[(i + 1) % vertices.length].x_mm,
+        y_mm: cornerPoints[(i + 1) % vertices.length].y_mm,
+        isCorner: true,
+      }
     }
 
     allSides.push({
@@ -316,10 +379,16 @@ export function computePolygonFasteners(vertices = [], sideConfig = {}, options 
       type,
       step_mm: segment.step_mm,
       count: segment.count,
+      length_mm: segment.length_mm,
       forced_step: segment.forced_step,
       overlap_warning: segment.overlap_warning,
       kantaWidth_mm: cantaWidth,
       placements: segment.placements,
+      anchors: {
+        start: cornerPoints[i],
+        end: cornerPoints[(i + 1) % vertices.length],
+      },
+      rawSegment: { start, end },
     })
   }
 

@@ -28,8 +28,8 @@ function renderFastenerShape(vertices, side, placement, idx) {
   if (side.type === 'grommets') {
     return (
       <g>
-        <circle cx={x} cy={y} r="10" fill="#d1d5db" stroke="#000000" strokeWidth="1.6" {...commonProps} />
-        <circle cx={x} cy={y} r="5" fill="#f8fafc" stroke="#000000" strokeWidth="1.4" />
+        <circle cx={x} cy={y} r="10" fill="#ffffff" stroke="#000000" strokeWidth="2.4" {...commonProps} />
+        <circle cx={x} cy={y} r="5" fill="#ffffff" stroke="#000000" strokeWidth="2.2" />
       </g>
     )
   }

@@ -1,25 +1,68 @@
-import { computeFastenersOnSegment } from '../lib/fasteners.v1'
+import {
+  computeCornerPlacement,
+  computePolygonFasteners,
+  computeSidePlacements,
+} from '../lib/fasteners.v1'
 
 describe('fasteners.v1', () => {
-  test('grommets use near 200-250 step range', () => {
-    const res = computeFastenersOnSegment({ x: 0, y: 0 }, { x: 2000, y: 0 }, 'grommets')
-    expect(res.count).toBeGreaterThan(2)
-    expect(res.step_mm).toBeGreaterThanOrEqual(200)
-    expect(res.step_mm).toBeLessThanOrEqual(250)
-    expect(res.placements[0].distFromStart_mm).toBeCloseTo(25)
+  test('rectangle width=1000 canto=50 gives expected grommet step logic', () => {
+    const side = computeSidePlacements({ x: 0, y: 0 }, { x: 1000, y: 0 }, {
+      type: 'grommets',
+      cornerOffset_mm: 25,
+      cantaWidth_mm: 50,
+      centroid: { x: 500, y: 250 },
+    })
+
+    expect(side.count).toBe(5)
+    expect(side.step_mm).toBe(238)
+    expect(side.placements.map((p) => p.distFromStart_mm)).toEqual([25, 263, 500, 738, 975])
   })
 
-  test('locks use near 400-450 step range', () => {
-    const res = computeFastenersOnSegment({ x: 0, y: 0 }, { x: 2400, y: 0 }, 'locks')
-    expect(res.step_mm).toBeGreaterThanOrEqual(350)
-    expect(res.step_mm).toBeLessThanOrEqual(450)
-    expect(res.placements[0].distFromStart_mm).toBeCloseTo(25)
+  test('short side returns corners only', () => {
+    const side = computeSidePlacements({ x: 0, y: 0 }, { x: 40, y: 0 }, {
+      type: 'grommets',
+      cornerOffset_mm: 25,
+      cantaWidth_mm: 50,
+      centroid: { x: 20, y: 20 },
+    })
+
+    expect(side.count).toBe(2)
+    expect(side.note).toBe('short_side_only_corners')
+    expect(side.placements[0].isCorner).toBe(true)
+    expect(side.placements[1].isCorner).toBe(true)
   })
 
-  test('segment with diagonal coordinates returns absolute points', () => {
-    const res = computeFastenersOnSegment({ x: 0, y: 0 }, { x: 1000, y: 1000 }, 'straps')
-    expect(res.placements.length).toBeGreaterThan(1)
-    expect(res.placements[0].x_mm).toBeGreaterThan(0)
-    expect(res.placements[0].y_mm).toBeGreaterThan(0)
+  test('90 degree corner is centered in kanta', () => {
+    const corner = computeCornerPlacement(
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 0, y: 100 },
+      25,
+      70,
+      { x: 50, y: 50 },
+    )
+
+    expect(corner.x_mm).toBeGreaterThanOrEqual(30)
+    expect(corner.y_mm).toBeGreaterThanOrEqual(30)
+  })
+
+  test('polygon computation does not duplicate corner coordinates', () => {
+    const vertices = [
+      { x: 0, y: 0 },
+      { x: 1000, y: 0 },
+      { x: 1000, y: 500 },
+      { x: 0, y: 500 },
+    ]
+    const sideConfig = {
+      A: { type: 'grommets', cantaWidth_mm: 150 },
+      B: { type: 'grommets', cantaWidth_mm: 150 },
+      C: { type: 'grommets', cantaWidth_mm: 150 },
+      D: { type: 'grommets', cantaWidth_mm: 150 },
+    }
+    const res = computePolygonFasteners(vertices, sideConfig, { cornerOffset_mm: 25, sideNames: ['A', 'B', 'C', 'D'] })
+
+    const corners = res.flatMap((s) => [s.placements[0], s.placements[s.placements.length - 1]])
+    const unique = new Set(corners.map((c) => `${c.x_mm}:${c.y_mm}`))
+    expect(unique.size).toBe(4)
   })
 })

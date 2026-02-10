@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import TriangleInput from './components/TriangleInput'
 import TrapezoidInput from './components/TrapezoidInput'
 import SVGCanvas from './components/SVGCanvas'
-import { computeFastenersOnSegment } from './lib/fasteners.v1'
+import { computePolygonFasteners } from './lib/fasteners.v1'
 import { computeRightTriangleFromCatheti, computeTriangleFromSides, computeTrapezoid } from './lib/geometry.v1'
 import { assembleMaterials, estimateCosts, RULES_VERSION } from './lib/calculator.rules.v1'
 
@@ -46,7 +46,6 @@ function geometryFromRectangle(width, height) {
   }
 }
 
-
 function sideLengths(vertices) {
   const names = ['A', 'B', 'C', 'D']
   const result = {}
@@ -79,9 +78,11 @@ export default function App() {
   const [filmType, setFilmType] = useState(FILM_OPTIONS[0].id)
   const [kantColorId, setKantColorId] = useState(KANT_COLOR_OPTIONS[0].id)
   const [hooksEnabled, setHooksEnabled] = useState(false)
+  const [manualMode, setManualMode] = useState(false)
 
   const [sideFasteners, setSideFasteners] = useState({ A: 'grommets', B: 'grommets', C: 'grommets', D: 'grommets' })
   const [sideKant, setSideKant] = useState({ A: 50, B: 50, C: 50, D: 50 })
+  const [manualPlacements, setManualPlacements] = useState({})
   const [laborCost, setLaborCost] = useState(0)
   const [markupPercent, setMarkupPercent] = useState(30)
   const [calcResult, setCalcResult] = useState(null)
@@ -107,76 +108,109 @@ export default function App() {
     const xs = geometryResult.vertices.map((v) => v.x)
     const width = Math.max(...xs) - Math.min(...xs)
     const usableBetweenEdgeHooks = Math.max(0, width - 400)
-    // Базово 2 крайних крючка (по 200 мм от края), далее +1 на каждые ~1.5 м между ними.
     return 2 + Math.floor(usableBetweenEdgeHooks / 1500)
   }, [hooksEnabled, geometryResult])
 
-  const fasteners = useMemo(() => {
+  const rawFasteners = useMemo(() => {
     if (!geometryResult.valid) return []
-    const vertices = geometryResult.vertices
-    const sideCount = vertices.length
-    const list = []
-    for (let i = 0; i < sideCount; i += 1) {
+    const sideConfig = {}
+    for (let i = 0; i < geometryResult.vertices.length; i += 1) {
       const side = SIDE_NAMES[i]
-      const type = sideFasteners[side] || 'none'
-      if (type === 'none') continue
-      const start = vertices[i]
-      const end = vertices[(i + 1) % sideCount]
-      const edgeOffsetMm = 25 + Number(sideKant[side] || 0) / 2
-      const segmentFasteners = computeFastenersOnSegment(start, end, type, edgeOffsetMm)
-      list.push({ side, type, count: segmentFasteners.count, step_mm: segmentFasteners.step_mm, placements: segmentFasteners.placements, kant_mm: sideKant[side] || 50 })
+      sideConfig[side] = {
+        type: sideFasteners[side] || 'none',
+        cantaWidth_mm: Number(sideKant[side] || 50),
+      }
     }
-    return list
+    return computePolygonFasteners(geometryResult.vertices, sideConfig, {
+      cornerOffset_mm: 25,
+      sideNames: SIDE_NAMES,
+    })
   }, [geometryResult, sideFasteners, sideKant])
 
-  const handleCalculate = () => {
-    if (!geometryResult.valid) return
-    const lengths = sideLengths(geometryResult.vertices)
-    const kantAreaMm2 = Object.entries(lengths).reduce((acc, [side, len]) => acc + len * Number(sideKant[side] || 0), 0)
-    const totalAreaMm2 = geometryResult.area_mm2 + kantAreaMm2
-    const geometry = { billableAreaM2: Math.max(1, totalAreaMm2 / 1_000_000), perimeterM: geometryResult.perimeter_mm / 1000 }
-    const fastenersBySide = Object.fromEntries(fasteners.map((side) => [side.side, { type: side.type, count: side.count }]))
-    const materials = assembleMaterials({
-      geometry,
-      fastenersBySide,
-      options: { bottomWeight: false, topDrip: false, rollStraps: hooksEnabled },
-      additionalMaterials: [],
-      rollStrapsCount: hooksCount,
+  const fasteners = useMemo(() => {
+    if (!manualMode) return rawFasteners
+    return rawFasteners.map((side) => {
+      const placements = side.placements.map((p, idx) => {
+        const key = `${side.side}-${idx}`
+        return manualPlacements[key]
+          ? { ...p, ...manualPlacements[key], manual_adjustment: true }
+          : p
+      })
+      return { ...side, placements }
     })
-    const specification = materials.map((m) => ({ ...m, lineTotal: Number((m.quantity * m.unitPrice).toFixed(2)) }))
-    const cost = estimateCosts(materials, laborCost, markupPercent)
-    setCalcResult({ specification, cost })
+  }, [manualMode, rawFasteners, manualPlacements])
+
+  function handleManualPlacementChange(side, index, field, value) {
+    const key = `${side}-${index}`
+    setManualPlacements((prev) => ({
+      ...prev,
+      [key]: {
+        ...(prev[key] || {}),
+        [field]: Number(value || 0),
+      },
+    }))
   }
 
-  const exportJson = () => {
+  function handleCalculate() {
+    if (!geometryResult.valid) return
+
+    const sideLengthMap = sideLengths(geometryResult.vertices)
+    const kantAreaMm2 = Object.entries(sideLengthMap)
+      .reduce((acc, [side, len]) => acc + len * Number(sideKant[side] || 0), 0)
+    const totalAreaMm2 = geometryResult.area_mm2 + kantAreaMm2
+    const billableAreaM2 = Math.max(1, totalAreaMm2 / 1_000_000)
+
+    const materials = assembleMaterials({
+      areaM2: billableAreaM2,
+      perimeterM: geometryResult.perimeter_mm / 1000,
+      fasteners,
+      options: { bottomWeight: false, topDrip: false, rollStraps: hooksEnabled },
+      kantSizeMm: 50,
+      rollStrapsCount: hooksCount,
+    })
+
+    const cost = estimateCosts({ materials, laborCost, markupPercent })
+    setCalcResult({ specification: materials, cost })
+  }
+
+  function exportJson() {
+    if (!geometryResult.valid) return
     const payload = {
-      order_id: `SW-${Date.now()}`,
-      created_by: 'Менеджер',
-      created_at: new Date().toISOString(),
-      rules_version: RULES_VERSION,
-      geometry: { vertices: geometryResult.vertices || [], sides: geometryResult.sides || null, area_mm2: geometryResult.area_mm2 || 0, perimeter_mm: geometryResult.perimeter_mm || 0, shapeType: shape },
-      colors: { film: selectedFilm, kant: selectedKantColor },
+      rulesVersion: RULES_VERSION,
+      shape,
+      geometry: {
+        shapeType: shape,
+        vertices: geometryResult.vertices,
+        sides: sideLengths(geometryResult.vertices),
+        area_mm2: geometryResult.area_mm2,
+        perimeter_mm: geometryResult.perimeter_mm,
+      },
+      colors: {
+        film: selectedFilm,
+        kant: selectedKantColor,
+      },
       hooks: { enabled: hooksEnabled, count: hooksCount },
       sideKant,
       fasteners,
-      specification: calcResult?.specification || [],
-      cost: calcResult?.cost || null,
+      manual_adjustment: manualMode,
+      exportedAt: new Date().toISOString(),
     }
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })
     const a = document.createElement('a')
-    a.href = url
-    a.download = `заказ-${shape}.json`
+    a.href = URL.createObjectURL(blob)
+    a.download = `заказ_${shape}_${Date.now()}.json`
     a.click()
-    URL.revokeObjectURL(url)
+    URL.revokeObjectURL(a.href)
   }
 
   return (
-    <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
-      <h1 className="text-2xl font-bold">Калькулятор «Мягкие окна»</h1>
+    <main className="mx-auto max-w-7xl space-y-4 p-4 text-slate-900">
+      <h1 className="text-2xl font-bold">Калькулятор мягких окон</h1>
+
       <div className="grid gap-4 lg:grid-cols-3">
         <section className="space-y-3 rounded-xl bg-white p-4 shadow">
-          <label className="block text-sm">Фигура
+          <h2 className="font-semibold">Геометрия изделия</h2>
+          <label className="block text-sm">Форма
             <select className="mt-1 w-full rounded border p-2" value={shape} onChange={(e) => setShape(e.target.value)}>
               <option value="rectangle">Прямоугольник</option>
               <option value="triangle">Треугольник</option>
@@ -186,8 +220,12 @@ export default function App() {
 
           {shape === 'rectangle' && (
             <div className="grid grid-cols-2 gap-2">
-              <label className="text-sm">Ширина (мм)<input type="number" className="mt-1 w-full rounded border p-2" value={rect.width} onChange={(e) => setRect((p) => ({ ...p, width: Number(e.target.value || 0) }))} /></label>
-              <label className="text-sm">Высота (мм)<input type="number" className="mt-1 w-full rounded border p-2" value={rect.height} onChange={(e) => setRect((p) => ({ ...p, height: Number(e.target.value || 0) }))} /></label>
+              <label className="text-sm">Ширина, мм
+                <input type="number" className="mt-1 w-full rounded border p-2" value={rect.width} onChange={(e) => setRect((p) => ({ ...p, width: Number(e.target.value || 0) }))} />
+              </label>
+              <label className="text-sm">Высота, мм
+                <input type="number" className="mt-1 w-full rounded border p-2" value={rect.height} onChange={(e) => setRect((p) => ({ ...p, height: Number(e.target.value || 0) }))} />
+              </label>
             </div>
           )}
 
@@ -195,13 +233,13 @@ export default function App() {
             <TriangleInput
               mode={triangleMode}
               onModeChange={setTriangleMode}
-              rightAngle={triangleRightAngle}
-              onRightAngleChange={setTriangleRightAngle}
               sides={triangleSides}
               catheti={triangleCatheti}
               errors={{}}
               onSidesChange={(k, v) => setTriangleSides((p) => ({ ...p, [k]: v }))}
               onCathetiChange={(k, v) => setTriangleCatheti((p) => ({ ...p, [k]: v }))}
+              rightAngle={triangleRightAngle}
+              onRightAngleChange={setTriangleRightAngle}
             />
           )}
 
@@ -229,13 +267,17 @@ export default function App() {
             <input type="checkbox" checked={hooksEnabled} onChange={(e) => setHooksEnabled(e.target.checked)} />
             Добавить крючки
           </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={manualMode} onChange={(e) => setManualMode(e.target.checked)} />
+            Редактировать люверсы вручную
+          </label>
 
           {!geometryResult.valid && <p className="rounded bg-rose-50 p-2 text-sm text-rose-700">Ошибка геометрии: {geometryResult.reason}</p>}
         </section>
 
         <section className="space-y-3 rounded-xl bg-white p-4 shadow">
           <h2 className="font-semibold">Крепления и кант по сторонам</h2>
-          {SIDE_NAMES.map((side) => (
+          {SIDE_NAMES.slice(0, geometryResult.vertices?.length || 4).map((side) => (
             <div key={side} className="grid grid-cols-2 gap-2">
               <label className="text-sm">Сторона {side}: крепление
                 <select className="mt-1 w-full rounded border p-2" value={sideFasteners[side]} onChange={(e) => setSideFasteners((p) => ({ ...p, [side]: e.target.value }))}>
@@ -275,19 +317,46 @@ export default function App() {
             hooksEnabled={hooksEnabled}
             hooksCount={hooksCount}
           />
-          {geometryResult.valid && <p className="text-sm">Площадь (с кантом): {(Math.max(1, (geometryResult.area_mm2 + Object.entries(sideLengths(geometryResult.vertices)).reduce((acc,[side,len]) => acc + len * Number(sideKant[side] || 0), 0)) / 1_000_000)).toFixed(3)} м², Периметр: {(geometryResult.perimeter_mm / 1000).toFixed(3)} м</p>}
+          {geometryResult.valid && <p className="text-sm">Площадь (с кантом): {(Math.max(1, (geometryResult.area_mm2 + Object.entries(sideLengths(geometryResult.vertices)).reduce((acc, [side, len]) => acc + len * Number(sideKant[side] || 0), 0)) / 1_000_000)).toFixed(3)} м², Периметр: {(geometryResult.perimeter_mm / 1000).toFixed(3)} м</p>}
 
           <h3 className="pt-2 font-semibold">Расход фурнитуры</h3>
           <table className="w-full border text-sm">
-            <thead className="bg-slate-100"><tr><th className="border p-1">Сторона</th><th className="border p-1">Тип</th><th className="border p-1">Кол-во</th><th className="border p-1">Шаг, мм</th><th className="border p-1">Кант, мм</th></tr></thead>
+            <thead className="bg-slate-100"><tr><th className="border p-1">Сторона</th><th className="border p-1">Тип</th><th className="border p-1">Кол-во</th><th className="border p-1">Шаг, мм</th><th className="border p-1">Примечание</th></tr></thead>
             <tbody>
               {fasteners.length === 0 ? <tr><td className="border p-1 text-center" colSpan="5">Крепления не выбраны</td></tr> : fasteners.map((item) => (
-                <tr key={`${item.side}-${item.type}`}><td className="border p-1">{item.side}</td><td className="border p-1">{FASTENER_OPTIONS[item.type]}</td><td className="border p-1">{item.count}</td><td className="border p-1">{item.step_mm.toFixed(1)}</td><td className="border p-1">{item.kant_mm}</td></tr>
+                <tr key={`${item.side}-${item.type}`}><td className="border p-1">{item.side}</td><td className="border p-1">{FASTENER_OPTIONS[item.type]}</td><td className="border p-1">{item.count}</td><td className="border p-1">{item.step_mm}</td><td className="border p-1">{item.forced_step ? 'Принудительный шаг' : item.overlap_warning ? 'Плотный угол' : ''}</td></tr>
               ))}
             </tbody>
           </table>
         </section>
       </div>
+
+      {manualMode && fasteners.length > 0 && (
+        <section className="space-y-3 rounded-xl bg-white p-4 shadow">
+          <h2 className="text-lg font-semibold">Координаты люверсов (мм)</h2>
+          <div className="space-y-3">
+            {fasteners.map((side) => (
+              <div key={`manual-${side.side}`}>
+                <p className="mb-1 text-sm font-semibold">Сторона {side.side} — {FASTENER_OPTIONS[side.type]}</p>
+                <table className="w-full border text-xs">
+                  <thead className="bg-slate-100"><tr><th className="border p-1">#</th><th className="border p-1">Угол</th><th className="border p-1">dist, мм</th><th className="border p-1">x, мм</th><th className="border p-1">y, мм</th></tr></thead>
+                  <tbody>
+                    {side.placements.map((p, idx) => (
+                      <tr key={`${side.side}-${idx}`}>
+                        <td className="border p-1">{idx + 1}</td>
+                        <td className="border p-1">{p.isCorner ? 'Да' : 'Нет'}</td>
+                        <td className="border p-1">{p.distFromStart_mm}</td>
+                        <td className="border p-1"><input className="w-24 rounded border p-1" type="number" value={manualPlacements[`${side.side}-${idx}`]?.x_mm ?? p.x_mm} onChange={(e) => handleManualPlacementChange(side.side, idx, 'x_mm', e.target.value)} /></td>
+                        <td className="border p-1"><input className="w-24 rounded border p-1" type="number" value={manualPlacements[`${side.side}-${idx}`]?.y_mm ?? p.y_mm} onChange={(e) => handleManualPlacementChange(side.side, idx, 'y_mm', e.target.value)} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {calcResult && (
         <section className="space-y-3 rounded-xl bg-white p-4 shadow">

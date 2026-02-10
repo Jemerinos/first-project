@@ -5,6 +5,7 @@ const FASTENER_RULES = {
 }
 
 const EPS = 1e-9
+// Для замков/ремней фиксируем производственный шаг 425 мм (в диапазоне 400–450 мм).
 const FIXED_STEP_MM = { locks: 425, straps: 425 }
 
 function clamp(value, min, max) {

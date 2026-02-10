@@ -20,7 +20,11 @@ function dot(a, b) {
   return a.x * b.x + a.y * b.y
 }
 
-function polygonCentroid(vertices = []) {
+function toMm(value) {
+  return Math.round(value)
+}
+
+export function polygonCentroid(vertices = []) {
   if (!vertices.length) return { x: 0, y: 0 }
   const sum = vertices.reduce((acc, v) => ({ x: acc.x + v.x, y: acc.y + v.y }), { x: 0, y: 0 })
   return { x: sum.x / vertices.length, y: sum.y / vertices.length }
@@ -41,49 +45,6 @@ function lineIntersection(p1, d1, p2, d2) {
   const dy = p2.y - p1.y
   const t = (dx * d2.y - dy * d2.x) / det
   return { x: p1.x + d1.x * t, y: p1.y + d1.y * t }
-}
-
-function toMm(value) {
-  return Math.round(value)
-}
-
-export function computeCornerPlacement(V, Vprev, Vnext, cornerOffsetMm, cantaWidthMm, centroid) {
-  const C = Math.max(0, Number(cornerOffsetMm || 0))
-  const r = Math.max(0, Number(cantaWidthMm || 0)) / 2
-
-  const d1 = normalize({ x: Vprev.x - V.x, y: Vprev.y - V.y })
-  const d2 = normalize({ x: Vnext.x - V.x, y: Vnext.y - V.y })
-
-  if ((Math.abs(d1.x) < EPS && Math.abs(d1.y) < EPS) || (Math.abs(d2.x) < EPS && Math.abs(d2.y) < EPS)) {
-    return { x_mm: toMm(V.x), y_mm: toMm(V.y), fallback_corner_placement: true }
-  }
-
-  const n1 = inwardNormal(V, Vprev, centroid)
-  const n2 = inwardNormal(V, Vnext, centroid)
-
-  const p1 = { x: V.x + d1.x * C + n1.x * r, y: V.y + d1.y * C + n1.y * r }
-  const p2 = { x: V.x + d2.x * C + n2.x * r, y: V.y + d2.y * C + n2.y * r }
-
-  const exact = lineIntersection(p1, d1, p2, d2)
-  if (exact) {
-    const proj1 = dot({ x: exact.x - V.x, y: exact.y - V.y }, d1)
-    const proj2 = dot({ x: exact.x - V.x, y: exact.y - V.y }, d2)
-    if (proj1 >= C - 1 && proj2 >= C - 1) {
-      return {
-        x_mm: toMm(exact.x),
-        y_mm: toMm(exact.y),
-      }
-    }
-  }
-
-  // fallback_corner_placement: average of both offset points + inward radial shift
-  const mid = { x: (V.x + d1.x * C + V.x + d2.x * C) / 2, y: (V.y + d1.y * C + V.y + d2.y * C) / 2 }
-  const inward = normalize({ x: centroid.x - mid.x, y: centroid.y - mid.y })
-  return {
-    x_mm: toMm(mid.x + inward.x * r),
-    y_mm: toMm(mid.y + inward.y * r),
-    fallback_corner_placement: true,
-  }
 }
 
 function calculateStepAndIntervals(usable, stepMin, stepMax) {
@@ -109,62 +70,46 @@ function calculateStepAndIntervals(usable, stepMin, stepMax) {
   }
 }
 
-export function computeSidePlacements(v1, v2, options = {}) {
+function placementsFromLength(getPointAtDistance, getNormalAtDistance, length, options = {}) {
   const {
     type,
     cornerOffset_mm = 25,
     cantaWidth_mm = 50,
-    centroid = { x: 0, y: 0 },
   } = options
 
   const rules = FASTENER_RULES[type]
-  if (!rules) {
+  if (!rules || length <= 0) {
     return {
       type,
       count: 0,
       step_mm: 0,
-      length_mm: 0,
+      length_mm: toMm(length || 0),
       placements: [],
       forced_step: false,
       overlap_warning: false,
     }
   }
 
-  const dx = v2.x - v1.x
-  const dy = v2.y - v1.y
-  const length = Math.hypot(dx, dy)
   const C = Math.max(0, Number(cornerOffset_mm || 0))
-  const normal = inwardNormal(v1, v2, centroid)
-  const perp = Math.max(0, Number(cantaWidth_mm || 0)) / 2
-
-  if (length < EPS) {
-    return {
-      type,
-      count: 0,
-      step_mm: 0,
-      length_mm: 0,
-      placements: [],
-      forced_step: false,
-      overlap_warning: false,
-    }
-  }
-
+  const inwardOffset = Math.max(0, Number(cantaWidth_mm || 0)) / 2
   const usable = length - 2 * C
 
   if (usable <= 0) {
     const dStart = clamp(C, 0, length)
     const dEnd = clamp(length - C, 0, length)
     const distances = [dStart, dEnd]
-    const placements = distances.map((s, idx) => {
-      const t = clamp(s / length, 0, 1)
+    const placements = distances.map((distance, idx) => {
+      const point = getPointAtDistance(distance)
+      const normal = getNormalAtDistance(distance)
       return {
         index: idx,
         isCorner: true,
-        distFromStart_mm: toMm(s),
-        x_mm: toMm(v1.x + dx * t + normal.x * perp),
-        y_mm: toMm(v1.y + dy * t + normal.y * perp),
+        distFromStart_mm: toMm(distance),
+        x_mm: toMm(point.x + normal.x * inwardOffset),
+        y_mm: toMm(point.y + normal.y * inwardOffset),
       }
     })
+
     return {
       type,
       count: placements.length,
@@ -178,17 +123,18 @@ export function computeSidePlacements(v1, v2, options = {}) {
   }
 
   const { intervals, step, forced_step } = calculateStepAndIntervals(usable, rules.step_min, rules.step_max)
-
   const placements = []
+
   for (let i = 0; i <= intervals; i += 1) {
-    const s = C + i * step
-    const t = clamp(s / length, 0, 1)
+    const distance = C + i * step
+    const point = getPointAtDistance(distance)
+    const normal = getNormalAtDistance(distance)
     placements.push({
       index: i,
       isCorner: i === 0 || i === intervals,
-      distFromStart_mm: toMm(s),
-      x_mm: toMm(v1.x + dx * t + normal.x * perp),
-      y_mm: toMm(v1.y + dy * t + normal.y * perp),
+      distFromStart_mm: toMm(distance),
+      x_mm: toMm(point.x + normal.x * inwardOffset),
+      y_mm: toMm(point.y + normal.y * inwardOffset),
     })
   }
 
@@ -203,6 +149,113 @@ export function computeSidePlacements(v1, v2, options = {}) {
   }
 }
 
+export function computeCornerPlacement(V, Vprev, Vnext, cornerOffsetMm, cantaWidthMm, centroid) {
+  const C = Math.max(0, Number(cornerOffsetMm || 0))
+  const r = Math.max(0, Number(cantaWidthMm || 0)) / 2
+
+  const d1 = normalize({ x: Vprev.x - V.x, y: Vprev.y - V.y })
+  const d2 = normalize({ x: Vnext.x - V.x, y: Vnext.y - V.y })
+
+  if ((Math.abs(d1.x) < EPS && Math.abs(d1.y) < EPS) || (Math.abs(d2.x) < EPS && Math.abs(d2.y) < EPS)) {
+    return { x_mm: toMm(V.x), y_mm: toMm(V.y), fallback_corner_placement: true }
+  }
+
+  const n1 = inwardNormal(V, Vprev, centroid)
+  const n2 = inwardNormal(V, Vnext, centroid)
+  const p1 = { x: V.x + d1.x * C + n1.x * r, y: V.y + d1.y * C + n1.y * r }
+  const p2 = { x: V.x + d2.x * C + n2.x * r, y: V.y + d2.y * C + n2.y * r }
+
+  const exact = lineIntersection(p1, d1, p2, d2)
+  if (exact) {
+    const proj1 = dot({ x: exact.x - V.x, y: exact.y - V.y }, d1)
+    const proj2 = dot({ x: exact.x - V.x, y: exact.y - V.y }, d2)
+    if (proj1 >= C - 1 && proj2 >= C - 1) {
+      return { x_mm: toMm(exact.x), y_mm: toMm(exact.y) }
+    }
+  }
+
+  // fallback_corner_placement: усреднение двух отложенных точек + смещение к центроиду
+  const mid = { x: (V.x + d1.x * C + V.x + d2.x * C) / 2, y: (V.y + d1.y * C + V.y + d2.y * C) / 2 }
+  const inward = normalize({ x: centroid.x - mid.x, y: centroid.y - mid.y })
+  return {
+    x_mm: toMm(mid.x + inward.x * r),
+    y_mm: toMm(mid.y + inward.y * r),
+    fallback_corner_placement: true,
+  }
+}
+
+export function computeSidePlacements(v1, v2, options = {}) {
+  const centroid = options.centroid || { x: 0, y: 0 }
+  const dx = v2.x - v1.x
+  const dy = v2.y - v1.y
+  const length = Math.hypot(dx, dy)
+
+  if (length <= 0) {
+    return {
+      type: options.type,
+      count: 0,
+      step_mm: 0,
+      length_mm: 0,
+      placements: [],
+      forced_step: false,
+      overlap_warning: false,
+    }
+  }
+
+  const lineNormal = inwardNormal(v1, v2, centroid)
+  return placementsFromLength(
+    (distance) => {
+      const t = clamp(distance / length, 0, 1)
+      return { x: v1.x + dx * t, y: v1.y + dy * t }
+    },
+    () => lineNormal,
+    length,
+    options,
+  )
+}
+
+// Для кривых сторон используем SVGGeometryElement API: getTotalLength/getPointAtLength
+export function computePathPlacements(pathGeometry, options = {}) {
+  if (!pathGeometry || typeof pathGeometry.getTotalLength !== 'function' || typeof pathGeometry.getPointAtLength !== 'function') {
+    return {
+      type: options.type,
+      count: 0,
+      step_mm: 0,
+      length_mm: 0,
+      placements: [],
+      forced_step: false,
+      overlap_warning: false,
+      note: 'invalid_path_geometry',
+    }
+  }
+
+  const centroid = options.centroid || { x: 0, y: 0 }
+  const length = Number(pathGeometry.getTotalLength() || 0)
+  const tangentEps = Math.max(1, Number(options.tangentEps_mm || 1))
+
+  return placementsFromLength(
+    (distance) => {
+      const d = clamp(distance, 0, length)
+      const p = pathGeometry.getPointAtLength(d)
+      return { x: p.x, y: p.y }
+    },
+    (distance) => {
+      const d1 = clamp(distance - tangentEps, 0, length)
+      const d2 = clamp(distance + tangentEps, 0, length)
+      const p1 = pathGeometry.getPointAtLength(d1)
+      const p2 = pathGeometry.getPointAtLength(d2)
+      const tangent = normalize({ x: p2.x - p1.x, y: p2.y - p1.y })
+      const nA = { x: -tangent.y, y: tangent.x }
+      const p = pathGeometry.getPointAtLength(clamp(distance, 0, length))
+      const toCenter = { x: centroid.x - p.x, y: centroid.y - p.y }
+      const normal = dot(nA, toCenter) >= 0 ? nA : { x: -nA.x, y: -nA.y }
+      return normalize(normal)
+    },
+    length,
+    options,
+  )
+}
+
 export function computePolygonFasteners(vertices = [], sideConfig = {}, options = {}) {
   if (!Array.isArray(vertices) || vertices.length < 2) return []
   const centroid = polygonCentroid(vertices)
@@ -211,30 +264,37 @@ export function computePolygonFasteners(vertices = [], sideConfig = {}, options 
 
   const allSides = []
   for (let i = 0; i < vertices.length; i += 1) {
-    const side = sides[i] || `S${i + 1}`
-    const cfg = sideConfig[side] || {}
+    const sideName = sides[i] || `S${i + 1}`
+    const cfg = sideConfig[sideName] || {}
     const type = cfg.type || 'none'
     if (type === 'none') continue
 
     const start = vertices[i]
     const end = vertices[(i + 1) % vertices.length]
-    const kantaWidth = Number(cfg.cantaWidth_mm || 50)
+    const cantaWidth = Number(cfg.cantaWidth_mm || 50)
 
-    const segment = computeSidePlacements(start, end, {
-      type,
-      cornerOffset_mm: cornerOffset,
-      cantaWidth_mm: kantaWidth,
-      centroid,
-    })
+    const segment = cfg.pathGeometry
+      ? computePathPlacements(cfg.pathGeometry, {
+        type,
+        cornerOffset_mm: cornerOffset,
+        cantaWidth_mm: cantaWidth,
+        centroid,
+      })
+      : computeSidePlacements(start, end, {
+        type,
+        cornerOffset_mm: cornerOffset,
+        cantaWidth_mm: cantaWidth,
+        centroid,
+      })
 
     if (!segment.placements.length) continue
 
     const prevVertex = vertices[(i - 1 + vertices.length) % vertices.length]
     const nextVertex = vertices[(i + 2) % vertices.length]
 
-    const startCorner = computeCornerPlacement(start, prevVertex, end, cornerOffset, kantaWidth, centroid)
+    const startCorner = computeCornerPlacement(start, prevVertex, end, cornerOffset, cantaWidth, centroid)
     const nextSideName = sides[(i + 1) % vertices.length] || `S${((i + 1) % vertices.length) + 1}`
-    const endKant = Number((sideConfig[nextSideName] || {}).cantaWidth_mm || kantaWidth)
+    const endKant = Number((sideConfig[nextSideName] || {}).cantaWidth_mm || cantaWidth)
     const endCorner = computeCornerPlacement(end, start, nextVertex, cornerOffset, endKant, centroid)
 
     segment.placements[0] = {
@@ -251,13 +311,14 @@ export function computePolygonFasteners(vertices = [], sideConfig = {}, options 
     }
 
     allSides.push({
-      side,
+      side: sideName,
+      sideName,
       type,
       step_mm: segment.step_mm,
       count: segment.count,
       forced_step: segment.forced_step,
       overlap_warning: segment.overlap_warning,
-      kantaWidth_mm: kantaWidth,
+      kantaWidth_mm: cantaWidth,
       placements: segment.placements,
     })
   }

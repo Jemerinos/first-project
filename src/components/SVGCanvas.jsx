@@ -10,6 +10,7 @@ function midpoint(a, b) {
 
 export default function SVGCanvas({
   vertices = [],
+  edgePaths = {},
   fasteners = [],
   triangleRightAngle,
   filmColor = '#cbd5e1',
@@ -59,7 +60,9 @@ export default function SVGCanvas({
           const kant = Number(sideKant[sideName] || 50)
           return (
             <g key={`side-${i}`}>
-              <line x1={v.x} y1={v.y} x2={next.x} y2={next.y} stroke={kantColor} strokeWidth={Math.max(8, kant * 2)} strokeLinecap="butt" strokeLinejoin="miter" />
+              {edgePaths[sideName]
+                ? <path d={edgePaths[sideName]} stroke={kantColor} fill="none" strokeWidth={Math.max(8, kant * 2)} strokeLinecap="butt" strokeLinejoin="miter" />
+                : <line x1={v.x} y1={v.y} x2={next.x} y2={next.y} stroke={kantColor} strokeWidth={Math.max(8, kant * 2)} strokeLinecap="butt" strokeLinejoin="miter" />}
               <text x={m.x} y={m.y - 12} textAnchor="middle" className="fill-slate-700 text-[26px]">
                 {`${sideName}: ${lineLength(v, next).toFixed(1)} мм / кант ${kant} мм`}
               </text>

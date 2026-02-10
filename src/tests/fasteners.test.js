@@ -122,6 +122,31 @@ describe('fasteners.v1', () => {
   })
 
 
+
+  test('Для прямоугольника середина канта образует внутренний прямоугольник', () => {
+    const vertices = [
+      { x: 0, y: 0 },
+      { x: 1000, y: 0 },
+      { x: 1000, y: 600 },
+      { x: 0, y: 600 },
+    ]
+    const sideConfig = {
+      A: { type: 'grommets', cantaWidth_mm: 100 },
+      B: { type: 'grommets', cantaWidth_mm: 100 },
+      C: { type: 'grommets', cantaWidth_mm: 100 },
+      D: { type: 'grommets', cantaWidth_mm: 100 },
+    }
+    const res = computePolygonFasteners(vertices, sideConfig, { cornerOffset_mm: 25, sideNames: ['A', 'B', 'C', 'D'] })
+    const corners = res.map((side) => [side.anchors.start.x_mm, side.anchors.start.y_mm])
+
+    expect(corners).toEqual([
+      [50, 50],
+      [950, 50],
+      [950, 550],
+      [50, 550],
+    ])
+  })
+
   test('Шаг считается от угловых точек пересечения середины канта', () => {
     const vertices = [
       { x: 0, y: 0 },

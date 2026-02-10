@@ -210,6 +210,34 @@ function placementsBetweenCornerAnchors(startPoint, endPoint, type) {
   }
 }
 
+
+
+function computeCornerMidlineIntersection(V, Vprev, Vnext, prevInset, nextInset, centroid) {
+  const dPrev = normalize({ x: Vprev.x - V.x, y: Vprev.y - V.y })
+  const dNext = normalize({ x: Vnext.x - V.x, y: Vnext.y - V.y })
+
+  if ((Math.abs(dPrev.x) < EPS && Math.abs(dPrev.y) < EPS) || (Math.abs(dNext.x) < EPS && Math.abs(dNext.y) < EPS)) {
+    return { x_mm: toMm(V.x), y_mm: toMm(V.y), fallback_corner_placement: true }
+  }
+
+  const nPrev = inwardNormal(V, Vprev, centroid)
+  const nNext = inwardNormal(V, Vnext, centroid)
+
+  // Жестко фиксируем линии середины канта: параллельно сторонам, сдвиг только перпендикулярно внутрь.
+  const l1Point = { x: V.x + nPrev.x * prevInset, y: V.y + nPrev.y * prevInset }
+  const l2Point = { x: V.x + nNext.x * nextInset, y: V.y + nNext.y * nextInset }
+
+  const exact = lineIntersection(l1Point, dPrev, l2Point, dNext)
+  if (exact) return { x_mm: toMm(exact.x), y_mm: toMm(exact.y) }
+
+  const avgInset = (prevInset + nextInset) / 2
+  const inward = normalize({ x: nPrev.x + nNext.x, y: nPrev.y + nNext.y })
+  return {
+    x_mm: toMm(V.x + inward.x * avgInset),
+    y_mm: toMm(V.y + inward.y * avgInset),
+    fallback_corner_placement: true,
+  }
+}
 export function computeCornerPlacement(V, Vprev, Vnext, cornerOffsetMm, cantaWidthMm, centroid) {
   const C = Math.max(0, Number(cornerOffsetMm || 0))
   const r = Math.max(0, Number(cantaWidthMm || 0)) / 2
@@ -327,10 +355,9 @@ export function computePolygonFasteners(vertices = [], sideConfig = {}, options 
     const nextVertex = vertices[(i + 1) % vertices.length]
     const prevSideName = sides[(i - 1 + sides.length) % sides.length] || `S${i}`
     const thisSideName = sides[i] || `S${i + 1}`
-    const prevKant = Number((sideConfig[prevSideName] || {}).cantaWidth_mm || 50)
-    const thisKant = Number((sideConfig[thisSideName] || {}).cantaWidth_mm || 50)
-    const avgKant = (prevKant + thisKant) / 2
-    return computeCornerPlacement(vertex, prevVertex, nextVertex, cornerOffset, avgKant, centroid)
+    const prevInset = Number((sideConfig[prevSideName] || {}).cantaWidth_mm || 50) / 2
+    const thisInset = Number((sideConfig[thisSideName] || {}).cantaWidth_mm || 50) / 2
+    return computeCornerMidlineIntersection(vertex, prevVertex, nextVertex, prevInset, thisInset, centroid)
   })
 
   const allSides = []

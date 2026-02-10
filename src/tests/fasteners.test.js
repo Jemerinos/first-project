@@ -53,6 +53,19 @@ describe('fasteners.v1', () => {
     expect(res[0].placements[0].isCorner).toBe(true)
   })
 
+  test('Замки имеют жёсткий шаг 425 мм', () => {
+    const side = computeSidePlacements({ x: 0, y: 0 }, { x: 2000, y: 0 }, {
+      type: 'locks',
+      cornerOffset_mm: 25,
+      cantaWidth_mm: 50,
+      centroid: { x: 1000, y: 500 },
+    })
+
+    expect(side.step_mm).toBe(425)
+    expect(side.placements[0].distFromStart_mm).toBe(25)
+    expect(side.placements[1].distFromStart_mm).toBe(450)
+  })
+
   test('Трапеция: корректные точки по всем сторонам', () => {
     const vertices = [{ x: 0, y: 0 }, { x: 1200, y: 0 }, { x: 1000, y: 700 }, { x: 200, y: 700 }]
     const sideConfig = {

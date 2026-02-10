@@ -28,7 +28,7 @@ function renderFastenerShape(vertices, side, placement, idx) {
   if (side.type === 'grommets') {
     return (
       <g>
-        <circle cx={x} cy={y} r="10" fill="#ffffff" stroke="#000000" strokeWidth="2.4" {...commonProps} />
+        <circle cx={x} cy={y} r="10" fill="#4b5563" stroke="#000000" strokeWidth="2.4" {...commonProps} />
         <circle cx={x} cy={y} r="5" fill="#ffffff" stroke="#000000" strokeWidth="2.2" />
       </g>
     )
@@ -38,7 +38,7 @@ function renderFastenerShape(vertices, side, placement, idx) {
     const angle = sideAngleDegrees(vertices, side.side)
     return (
       <g transform={`translate(${x} ${y}) rotate(${angle})`} {...commonProps}>
-        <rect x={-35} y={-17.5} width="70" height="35" rx="6" ry="6" fill="none" stroke="#000000" strokeWidth="2.5" />
+        <rect x={-35} y={-17.5} width="70" height="35" rx="17.5" ry="17.5" fill="none" stroke="#000000" strokeWidth="2.5" />
       </g>
     )
   }
@@ -47,7 +47,7 @@ function renderFastenerShape(vertices, side, placement, idx) {
     const angle = sideAngleDegrees(vertices, side.side)
     return (
       <g transform={`translate(${x} ${y}) rotate(${angle})`} {...commonProps}>
-        <rect x={-35} y={-17.5} width="70" height="35" rx="6" ry="6" fill="none" stroke="#0f172a" strokeWidth="2" strokeDasharray="6 4" />
+        <rect x={-35} y={-17.5} width="70" height="35" rx="17.5" ry="17.5" fill="none" stroke="#0f172a" strokeWidth="2" strokeDasharray="6 4" />
       </g>
     )
   }

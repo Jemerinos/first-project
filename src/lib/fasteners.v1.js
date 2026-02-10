@@ -5,6 +5,7 @@ const FASTENER_RULES = {
 }
 
 const EPS = 1e-9
+const FIXED_STEP_MM = { locks: 425, straps: 425 }
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value))
@@ -70,6 +71,18 @@ function calculateStepAndIntervals(usable, stepMin, stepMax) {
   }
 }
 
+function buildFixedDistances(startDistance, endDistance, fixedStepMm) {
+  const distances = [startDistance]
+  let cursor = startDistance + fixedStepMm
+  while (cursor < endDistance - EPS) {
+    distances.push(cursor)
+    cursor += fixedStepMm
+  }
+  if (endDistance - distances[distances.length - 1] > EPS) distances.push(endDistance)
+  return distances
+}
+
+
 function placementsFromLength(getPointAtDistance, getNormalAtDistance, length, options = {}) {
   const {
     type,
@@ -122,9 +135,34 @@ function placementsFromLength(getPointAtDistance, getNormalAtDistance, length, o
     }
   }
 
-  const { intervals, step, forced_step } = calculateStepAndIntervals(usable, rules.step_min, rules.step_max)
+  const fixedStep = FIXED_STEP_MM[type]
   const placements = []
 
+  if (fixedStep) {
+    const distances = buildFixedDistances(C, length - C, fixedStep)
+    distances.forEach((distance, i) => {
+      const point = getPointAtDistance(distance)
+      const normal = getNormalAtDistance(distance)
+      placements.push({
+        index: i,
+        isCorner: i === 0 || i === distances.length - 1,
+        distFromStart_mm: toMm(distance),
+        x_mm: toMm(point.x + normal.x * inwardOffset),
+        y_mm: toMm(point.y + normal.y * inwardOffset),
+      })
+    })
+    return {
+      type,
+      count: placements.length,
+      step_mm: fixedStep,
+      length_mm: toMm(length),
+      placements,
+      forced_step: false,
+      overlap_warning: false,
+    }
+  }
+
+  const { intervals, step, forced_step } = calculateStepAndIntervals(usable, rules.step_min, rules.step_max)
   for (let i = 0; i <= intervals; i += 1) {
     const distance = C + i * step
     const point = getPointAtDistance(distance)
@@ -184,9 +222,33 @@ function placementsBetweenCornerAnchors(startPoint, endPoint, type) {
     }
   }
 
-  const { intervals, step, forced_step } = calculateStepAndIntervals(length, rules.step_min, rules.step_max)
+  const fixedStep = FIXED_STEP_MM[type]
   const placements = []
 
+  if (fixedStep) {
+    const distances = buildFixedDistances(0, length, fixedStep)
+    distances.forEach((distance, i) => {
+      const t = clamp(distance / length, 0, 1)
+      placements.push({
+        index: i,
+        isCorner: i === 0 || i === distances.length - 1,
+        distFromStart_mm: toMm(distance),
+        x_mm: toMm(startPoint.x + dx * t),
+        y_mm: toMm(startPoint.y + dy * t),
+      })
+    })
+    return {
+      type,
+      count: placements.length,
+      step_mm: fixedStep,
+      length_mm: toMm(length),
+      placements,
+      forced_step: false,
+      overlap_warning: false,
+    }
+  }
+
+  const { intervals, step, forced_step } = calculateStepAndIntervals(length, rules.step_min, rules.step_max)
   for (let i = 0; i <= intervals; i += 1) {
     const distance = i * step
     const t = clamp(distance / length, 0, 1)

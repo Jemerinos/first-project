@@ -8,6 +8,53 @@ function midpoint(a, b) {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
 }
 
+function sideAngleDegrees(vertices, sideName) {
+  const sideIndex = SIDE_LABELS.indexOf(sideName)
+  if (sideIndex < 0 || sideIndex >= vertices.length) return 0
+  const start = vertices[sideIndex]
+  const end = vertices[(sideIndex + 1) % vertices.length]
+  return (Math.atan2(end.y - start.y, end.x - start.x) * 180) / Math.PI
+}
+
+function renderFastenerShape(vertices, side, placement, idx) {
+  const x = placement.x_mm
+  const y = placement.y_mm
+  const commonProps = {
+    'data-side': side.side,
+    'data-index': idx,
+    'data-dist': placement.distFromStart_mm,
+  }
+
+  if (side.type === 'grommets') {
+    return (
+      <g>
+        <circle cx={x} cy={y} r="10" fill="#d1d5db" stroke="#000000" strokeWidth="1.6" {...commonProps} />
+        <circle cx={x} cy={y} r="5" fill="#f8fafc" stroke="#000000" strokeWidth="1.4" />
+      </g>
+    )
+  }
+
+  if (side.type === 'locks') {
+    const angle = sideAngleDegrees(vertices, side.side)
+    return (
+      <g transform={`translate(${x} ${y}) rotate(${angle})`} {...commonProps}>
+        <rect x={-35} y={-17.5} width="70" height="35" rx="6" ry="6" fill="none" stroke="#000000" strokeWidth="2.5" />
+      </g>
+    )
+  }
+
+  if (side.type === 'straps') {
+    const angle = sideAngleDegrees(vertices, side.side)
+    return (
+      <g transform={`translate(${x} ${y}) rotate(${angle})`} {...commonProps}>
+        <rect x={-35} y={-17.5} width="70" height="35" rx="6" ry="6" fill="none" stroke="#0f172a" strokeWidth="2" strokeDasharray="6 4" />
+      </g>
+    )
+  }
+
+  return <circle cx={x} cy={y} r="9" fill="#334155" {...commonProps} />
+}
+
 export default function SVGCanvas({
   vertices = [],
   edgePaths = {},
@@ -83,20 +130,10 @@ export default function SVGCanvas({
         const key = `${Math.round(p.x_mm)}:${Math.round(p.y_mm)}`
         if (renderedKeys.has(key)) return null
         renderedKeys.add(key)
-        const fill = p.isCorner ? '#7c3aed' : side.type === 'grommets' ? '#0284c7' : side.type === 'locks' ? '#ea580c' : '#16a34a'
         return (
           <g key={`${side.side}-${idx}`}>
-            <circle
-              cx={p.x_mm}
-              cy={p.y_mm}
-              r="9"
-              fill={fill}
-              data-side={side.side}
-              data-index={idx}
-              data-dist={p.distFromStart_mm}
-            >
-              <title>{`Сторона ${side.side}; dist=${p.distFromStart_mm} мм; ${p.isCorner ? 'угловой' : 'внутренний'}`}</title>
-            </circle>
+            {renderFastenerShape(vertices, side, p, idx)}
+            <title>{`Сторона ${side.side}; dist=${p.distFromStart_mm} мм; ${p.isCorner ? 'угловой' : 'внутренний'}`}</title>
           </g>
         )
       }))}

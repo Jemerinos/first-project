@@ -65,7 +65,8 @@ export default function SVGCanvas({
   sideKant = {},
   hooksEnabled = false,
   hooksCount = 0,
-  seamSide,
+  seamOrientation,
+  rollLimitMm = 2600,
 }) {
   if (!vertices.length) return <div className="rounded bg-slate-100 p-4 text-sm">Нет геометрии для отрисовки.</div>
 
@@ -90,9 +91,8 @@ export default function SVGCanvas({
 
   const renderedKeys = new Set()
 
-  const seamIndex = seamSide ? SIDE_LABELS.indexOf(seamSide) : -1
-  const seamStart = seamIndex >= 0 && seamIndex < vertices.length ? vertices[seamIndex] : null
-  const seamEnd = seamIndex >= 0 && seamIndex < vertices.length ? vertices[(seamIndex + 1) % vertices.length] : null
+  const seamPosition = seamOrientation === 'vertical' ? minX + rollLimitMm : seamOrientation === 'horizontal' ? minY + rollLimitMm : null
+  const seamVisible = seamOrientation === 'vertical' ? seamPosition !== null && seamPosition <= maxX : seamOrientation === 'horizontal' ? seamPosition !== null && seamPosition <= maxY : false
 
   return (
     <svg viewBox={viewBox} className="h-[360px] w-full rounded-lg bg-slate-50">
@@ -128,25 +128,38 @@ export default function SVGCanvas({
       )}
 
 
-      {seamStart && seamEnd && (
+      {seamVisible && (
         <g>
-          <line
-            x1={seamStart.x}
-            y1={seamStart.y}
-            x2={seamEnd.x}
-            y2={seamEnd.y}
-            stroke="#dc2626"
-            strokeWidth="6"
-            strokeDasharray="18 10"
-            strokeLinecap="round"
-          />
+          {seamOrientation === 'vertical' ? (
+            <line
+              x1={seamPosition}
+              y1={minY}
+              x2={seamPosition}
+              y2={maxY}
+              stroke="#dc2626"
+              strokeWidth="6"
+              strokeDasharray="18 10"
+              strokeLinecap="round"
+            />
+          ) : (
+            <line
+              x1={minX}
+              y1={seamPosition}
+              x2={maxX}
+              y2={seamPosition}
+              stroke="#dc2626"
+              strokeWidth="6"
+              strokeDasharray="18 10"
+              strokeLinecap="round"
+            />
+          )}
           <text
-            x={(seamStart.x + seamEnd.x) / 2}
-            y={(seamStart.y + seamEnd.y) / 2 - 16}
-            textAnchor="middle"
+            x={seamOrientation === 'vertical' ? seamPosition + 18 : (minX + maxX) / 2}
+            y={seamOrientation === 'vertical' ? minY + 24 : seamPosition - 16}
+            textAnchor={seamOrientation === 'vertical' ? 'start' : 'middle'}
             className="fill-red-700 text-[18px]"
           >
-            Сварной шов плёнки
+            Граница рулона 2600 мм / шов
           </text>
         </g>
       )}

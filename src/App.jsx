@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import TriangleInput from './components/TriangleInput'
 import TrapezoidInput from './components/TrapezoidInput'
 import SVGCanvas from './components/SVGCanvas'
@@ -96,7 +96,7 @@ export default function App() {
   const [kantColorId, setKantColorId] = useState(KANT_COLOR_OPTIONS[0].id)
   const [hooksEnabled, setHooksEnabled] = useState(false)
   const [manualMode, setManualMode] = useState(false)
-  const [filmSeamSide, setFilmSeamSide] = useState('A')
+  const [filmSeamOrientation, setFilmSeamOrientation] = useState('vertical')
 
   const [sideFasteners, setSideFasteners] = useState({ A: 'grommets', B: 'grommets', C: 'grommets', D: 'grommets' })
   const [sideKant, setSideKant] = useState({ A: 50, B: 50, C: 50, D: 50 })
@@ -129,8 +129,19 @@ export default function App() {
     const ys = geometryResult.vertices.map((v) => v.y)
     const width = Math.max(...xs) - Math.min(...xs)
     const height = Math.max(...ys) - Math.min(...ys)
-    return { width, height, needsSeam: width > 2600 || height > 2600 }
+    const availableOrientations = []
+    if (width > 2600) availableOrientations.push('vertical')
+    if (height > 2600) availableOrientations.push('horizontal')
+    return { width, height, needsSeam: width > 2600 || height > 2600, availableOrientations }
   }, [geometryResult])
+
+
+  useEffect(() => {
+    if (!overallSize.needsSeam) return
+    if (!overallSize.availableOrientations.includes(filmSeamOrientation)) {
+      setFilmSeamOrientation(overallSize.availableOrientations[0] || 'vertical')
+    }
+  }, [overallSize, filmSeamOrientation])
 
   const hooksCount = useMemo(() => {
     if (!hooksEnabled || !geometryResult.valid) return 0
@@ -215,7 +226,7 @@ export default function App() {
         kant: selectedKantColor,
       },
       hooks: { enabled: hooksEnabled, count: hooksCount },
-      filmSeam: overallSize.needsSeam ? { enabled: true, side: filmSeamSide, rollLimit_mm: 2600 } : { enabled: false, rollLimit_mm: 2600 },
+      filmSeam: overallSize.needsSeam ? { enabled: true, orientation: filmSeamOrientation, rollLimit_mm: 2600 } : { enabled: false, rollLimit_mm: 2600 },
       sideKant,
       fasteners,
       manual_adjustment: manualMode,
@@ -301,10 +312,13 @@ export default function App() {
 
           {overallSize.needsSeam && (
             <label className="block text-sm">Сварной шов плёнки (лимит рулона 2600 мм)
-              <select className="mt-1 w-full rounded border p-2" value={filmSeamSide} onChange={(e) => setFilmSeamSide(e.target.value)}>
-                {SIDE_NAMES.slice(0, geometryResult.vertices?.length || 4).map((side) => (
-                  <option key={side} value={side}>{`По стороне ${side}`}</option>
-                ))}
+              <select
+                className="mt-1 w-full rounded border p-2"
+                value={filmSeamOrientation}
+                onChange={(e) => setFilmSeamOrientation(e.target.value)}
+              >
+                {overallSize.availableOrientations.includes('vertical') && <option value="vertical">Вертикально</option>}
+                {overallSize.availableOrientations.includes('horizontal') && <option value="horizontal">Горизонтально</option>}
               </select>
             </label>
           )}
@@ -352,7 +366,8 @@ export default function App() {
             sideKant={sideKant}
             hooksEnabled={hooksEnabled}
             hooksCount={hooksCount}
-            seamSide={overallSize.needsSeam ? filmSeamSide : undefined}
+            seamOrientation={overallSize.needsSeam ? filmSeamOrientation : undefined}
+            rollLimitMm={2600}
           />
           {geometryResult.valid && <p className="text-sm">Площадь изделия: {(Math.max(1, geometryResult.area_mm2 / 1_000_000)).toFixed(3)} м², Периметр: {(geometryResult.perimeter_mm / 1000).toFixed(3)} м</p>}
 

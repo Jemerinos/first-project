@@ -14,14 +14,6 @@ export default function TriangleInput({ mode, onModeChange, rightAngle, onRightA
         </select>
       </label>
 
-      <label className="block text-sm">Положение прямого угла
-        <select className="mt-1 w-full rounded border p-2" value={rightAngle} onChange={(e) => onRightAngleChange(e.target.value)}>
-          {RIGHT_ANGLES.map((angle) => (
-            <option key={angle.key} value={angle.key}>{angle.label}</option>
-          ))}
-        </select>
-      </label>
-
       {mode === 'sides' && (
         <div className="grid grid-cols-3 gap-2">
           {['a', 'b', 'c'].map((k) => (
@@ -40,27 +32,37 @@ export default function TriangleInput({ mode, onModeChange, rightAngle, onRightA
       )}
 
       {mode === 'catheti' && (
-        <div className="grid grid-cols-2 gap-2">
-          <label className="text-sm">Катет по ширине (мм)
-            <input
-              type="number"
-              min="1"
-              value={catheti.width}
-              className={`mt-1 w-full rounded border p-2 ${errors?.cathetusWidth ? 'border-rose-500' : ''}`}
-              onChange={(e) => onCathetiChange('width', Number(e.target.value || 0))}
-            />
+        <>
+          <label className="block text-sm">Положение прямого угла
+            <select className="mt-1 w-full rounded border p-2" value={rightAngle} onChange={(e) => onRightAngleChange(e.target.value)}>
+              {RIGHT_ANGLES.map((angle) => (
+                <option key={angle.key} value={angle.key}>{angle.label}</option>
+              ))}
+            </select>
           </label>
-          <label className="text-sm">Катет по высоте (мм)
-            <input
-              type="number"
-              min="1"
-              value={catheti.height}
-              className={`mt-1 w-full rounded border p-2 ${errors?.cathetusHeight ? 'border-rose-500' : ''}`}
-              onChange={(e) => onCathetiChange('height', Number(e.target.value || 0))}
-            />
-          </label>
-          <p className="col-span-2 rounded bg-slate-100 p-2 text-sm">Гипотенуза считается автоматически после ввода катетов.</p>
-        </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-sm">Катет по ширине (мм)
+              <input
+                type="number"
+                min="1"
+                value={catheti.width}
+                className={`mt-1 w-full rounded border p-2 ${errors?.cathetusWidth ? 'border-rose-500' : ''}`}
+                onChange={(e) => onCathetiChange('width', Number(e.target.value || 0))}
+              />
+            </label>
+            <label className="text-sm">Катет по высоте (мм)
+              <input
+                type="number"
+                min="1"
+                value={catheti.height}
+                className={`mt-1 w-full rounded border p-2 ${errors?.cathetusHeight ? 'border-rose-500' : ''}`}
+                onChange={(e) => onCathetiChange('height', Number(e.target.value || 0))}
+              />
+            </label>
+            <p className="col-span-2 rounded bg-slate-100 p-2 text-sm">Выбор вершины прямого угла сразу меняет построение фигуры.</p>
+          </div>
+        </>
       )}
     </div>
   )

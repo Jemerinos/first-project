@@ -65,6 +65,7 @@ export default function SVGCanvas({
   sideKant = {},
   hooksEnabled = false,
   hooksCount = 0,
+  seamSide,
 }) {
   if (!vertices.length) return <div className="rounded bg-slate-100 p-4 text-sm">Нет геометрии для отрисовки.</div>
 
@@ -88,6 +89,10 @@ export default function SVGCanvas({
     : []
 
   const renderedKeys = new Set()
+
+  const seamIndex = seamSide ? SIDE_LABELS.indexOf(seamSide) : -1
+  const seamStart = seamIndex >= 0 && seamIndex < vertices.length ? vertices[seamIndex] : null
+  const seamEnd = seamIndex >= 0 && seamIndex < vertices.length ? vertices[(seamIndex + 1) % vertices.length] : null
 
   return (
     <svg viewBox={viewBox} className="h-[360px] w-full rounded-lg bg-slate-50">
@@ -120,6 +125,30 @@ export default function SVGCanvas({
 
       {rightAngleIndex >= 0 && vertices[rightAngleIndex] && (
         <rect x={vertices[rightAngleIndex].x + 16} y={vertices[rightAngleIndex].y + 16} width="30" height="30" fill="none" stroke="#0f172a" strokeWidth="4" />
+      )}
+
+
+      {seamStart && seamEnd && (
+        <g>
+          <line
+            x1={seamStart.x}
+            y1={seamStart.y}
+            x2={seamEnd.x}
+            y2={seamEnd.y}
+            stroke="#dc2626"
+            strokeWidth="6"
+            strokeDasharray="18 10"
+            strokeLinecap="round"
+          />
+          <text
+            x={(seamStart.x + seamEnd.x) / 2}
+            y={(seamStart.y + seamEnd.y) / 2 - 16}
+            textAnchor="middle"
+            className="fill-red-700 text-[18px]"
+          >
+            Сварной шов плёнки
+          </text>
+        </g>
       )}
 
       {hookXs.map((x, idx) => (

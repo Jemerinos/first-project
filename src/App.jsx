@@ -57,13 +57,30 @@ function sideLengths(vertices) {
   return result
 }
 
-function rotateTriangleToRightAngle(vertices, rightAngle) {
-  if (!vertices || vertices.length !== 3) return vertices
-  const map = { A: 0, B: 1, C: 2 }
-  const rightIndex = map[rightAngle] ?? 0
-  if (rightIndex === 0) return vertices
-  if (rightIndex === 1) return [vertices[1], vertices[2], vertices[0]]
-  return [vertices[2], vertices[0], vertices[1]]
+function buildRightTriangleByAngle(width, height, rightAngle) {
+  const w = Number(width)
+  const h = Number(height)
+  if (!(w > 0 && h > 0)) return null
+
+  if (rightAngle === 'B') {
+    return [
+      { x: -w, y: 0 },
+      { x: 0, y: 0 },
+      { x: 0, y: h },
+    ]
+  }
+  if (rightAngle === 'C') {
+    return [
+      { x: 0, y: -h },
+      { x: w, y: 0 },
+      { x: 0, y: 0 },
+    ]
+  }
+  return [
+    { x: 0, y: 0 },
+    { x: w, y: 0 },
+    { x: 0, y: h },
+  ]
 }
 
 export default function App() {
@@ -79,6 +96,7 @@ export default function App() {
   const [kantColorId, setKantColorId] = useState(KANT_COLOR_OPTIONS[0].id)
   const [hooksEnabled, setHooksEnabled] = useState(false)
   const [manualMode, setManualMode] = useState(false)
+  const [filmSeamSide, setFilmSeamSide] = useState('A')
 
   const [sideFasteners, setSideFasteners] = useState({ A: 'grommets', B: 'grommets', C: 'grommets', D: 'grommets' })
   const [sideKant, setSideKant] = useState({ A: 50, B: 50, C: 50, D: 50 })
@@ -92,16 +110,27 @@ export default function App() {
 
   const geometryResult = useMemo(() => {
     if (shape === 'triangle') {
-      const baseResult = triangleMode === 'sides'
-        ? computeTriangleFromSides(triangleSides.a, triangleSides.b, triangleSides.c)
-        : computeRightTriangleFromCatheti(triangleCatheti.width, triangleCatheti.height)
-
-      if (!baseResult.valid) return baseResult
-      return { ...baseResult, vertices: rotateTriangleToRightAngle(baseResult.vertices, triangleRightAngle) }
+      if (triangleMode === 'catheti') {
+        const baseResult = computeRightTriangleFromCatheti(triangleCatheti.width, triangleCatheti.height)
+        if (!baseResult.valid) return baseResult
+        const oriented = buildRightTriangleByAngle(triangleCatheti.width, triangleCatheti.height, triangleRightAngle)
+        return oriented ? { ...baseResult, vertices: oriented } : baseResult
+      }
+      return computeTriangleFromSides(triangleSides.a, triangleSides.b, triangleSides.c)
     }
     if (shape === 'trapezoid') return computeTrapezoid(trapezoid.baseA, trapezoid.baseB, trapezoid.left, trapezoid.right, trapezoidFlags)
     return geometryFromRectangle(Number(rect.width), Number(rect.height))
   }, [shape, triangleMode, triangleSides, triangleCatheti, triangleRightAngle, trapezoid, trapezoidFlags, rect])
+
+
+  const overallSize = useMemo(() => {
+    if (!geometryResult.valid || !geometryResult.vertices?.length) return { width: 0, height: 0, needsSeam: false }
+    const xs = geometryResult.vertices.map((v) => v.x)
+    const ys = geometryResult.vertices.map((v) => v.y)
+    const width = Math.max(...xs) - Math.min(...xs)
+    const height = Math.max(...ys) - Math.min(...ys)
+    return { width, height, needsSeam: width > 2600 || height > 2600 }
+  }, [geometryResult])
 
   const hooksCount = useMemo(() => {
     if (!hooksEnabled || !geometryResult.valid) return 0
@@ -186,6 +215,7 @@ export default function App() {
         kant: selectedKantColor,
       },
       hooks: { enabled: hooksEnabled, count: hooksCount },
+      filmSeam: overallSize.needsSeam ? { enabled: true, side: filmSeamSide, rollLimit_mm: 2600 } : { enabled: false, rollLimit_mm: 2600 },
       sideKant,
       fasteners,
       manual_adjustment: manualMode,
@@ -268,6 +298,16 @@ export default function App() {
             Редактировать люверсы вручную
           </label>
 
+
+          {overallSize.needsSeam && (
+            <label className="block text-sm">Сварной шов плёнки (лимит рулона 2600 мм)
+              <select className="mt-1 w-full rounded border p-2" value={filmSeamSide} onChange={(e) => setFilmSeamSide(e.target.value)}>
+                {SIDE_NAMES.slice(0, geometryResult.vertices?.length || 4).map((side) => (
+                  <option key={side} value={side}>{`По стороне ${side}`}</option>
+                ))}
+              </select>
+            </label>
+          )}
           {!geometryResult.valid && <p className="rounded bg-rose-50 p-2 text-sm text-rose-700">Ошибка геометрии: {geometryResult.reason}</p>}
         </section>
 
@@ -306,12 +346,13 @@ export default function App() {
           <SVGCanvas
             vertices={geometryResult.vertices || []}
             fasteners={fasteners}
-            triangleRightAngle={shape === 'triangle' ? triangleRightAngle : undefined}
+            triangleRightAngle={shape === 'triangle' && triangleMode === 'catheti' ? triangleRightAngle : undefined}
             filmColor={selectedFilm.color}
             kantColor={selectedKantColor.color}
             sideKant={sideKant}
             hooksEnabled={hooksEnabled}
             hooksCount={hooksCount}
+            seamSide={overallSize.needsSeam ? filmSeamSide : undefined}
           />
           {geometryResult.valid && <p className="text-sm">Площадь изделия: {(Math.max(1, geometryResult.area_mm2 / 1_000_000)).toFixed(3)} м², Периметр: {(geometryResult.perimeter_mm / 1000).toFixed(3)} м</p>}
 

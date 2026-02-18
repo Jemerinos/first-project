@@ -189,6 +189,28 @@ describe('fasteners.v1', () => {
     expect(top.step_mm).toBeLessThanOrEqual(250)
   })
 
+  test('Если на нижней стороне нет крепления, боковые стартуют с отступом 140 мм от нижних углов', () => {
+    const vertices = [
+      { x: 0, y: 0 },
+      { x: 3000, y: 0 },
+      { x: 3000, y: 2000 },
+      { x: 0, y: 2000 },
+    ]
+    const sideConfig = {
+      A: { type: 'grommets', cantaWidth_mm: 50 },
+      B: { type: 'grommets', cantaWidth_mm: 50, endOffset_mm: 140 },
+      C: { type: 'none', cantaWidth_mm: 50 },
+      D: { type: 'grommets', cantaWidth_mm: 50, startOffset_mm: 140 },
+    }
+
+    const res = computePolygonFasteners(vertices, sideConfig, { cornerOffset_mm: 25, sideNames: ['A', 'B', 'C', 'D'] })
+    const right = res.find((s) => s.side === 'B')
+    const left = res.find((s) => s.side === 'D')
+
+    expect(right.placements[right.placements.length - 1].distFromStart_mm).toBe(1810)
+    expect(left.placements[0].distFromStart_mm).toBe(140)
+  })
+
   test('Арочная сторона: точки через getTotalLength/getPointAtLength', () => {
     const arcPath = makeQuarterArcPath(500)
     const res = computePathPlacements(arcPath, {

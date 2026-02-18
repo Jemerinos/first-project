@@ -130,7 +130,7 @@ function placementsFromLength(getPointAtDistance, getNormalAtDistance, length, o
     const normal = getNormalAtDistance(distance)
     placements.push({
       index: i,
-      isCorner: i === 0 || i === intervals,
+      isCorner: (i === 0 && startOffset === 0) || (i === intervals && endOffset === 0),
       distFromStart_mm: toMm(distance),
       x_mm: toMm(point.x + normal.x * inwardOffset),
       y_mm: toMm(point.y + normal.y * inwardOffset),
@@ -148,11 +148,13 @@ function placementsFromLength(getPointAtDistance, getNormalAtDistance, length, o
   }
 }
 
-function placementsBetweenCornerAnchors(startPoint, endPoint, type) {
+function placementsBetweenCornerAnchors(startPoint, endPoint, type, options = {}) {
   const rules = FASTENER_RULES[type]
   const dx = endPoint.x - startPoint.x
   const dy = endPoint.y - startPoint.y
   const length = Math.hypot(dx, dy)
+  const startOffset = Math.max(0, Number(options.startOffset_mm || 0))
+  const endOffset = Math.max(0, Number(options.endOffset_mm || 0))
 
   if (!rules || length <= 0) {
     return {
@@ -166,10 +168,16 @@ function placementsBetweenCornerAnchors(startPoint, endPoint, type) {
     }
   }
 
-  if (length < rules.step_min) {
+  const usable = length - startOffset - endOffset
+
+  if (usable < rules.step_min) {
+    const d0 = clamp(startOffset, 0, length)
+    const d1 = clamp(length - endOffset, 0, length)
+    const t0 = clamp(d0 / length, 0, 1)
+    const t1 = clamp(d1 / length, 0, 1)
     const placements = [
-      { index: 0, isCorner: true, distFromStart_mm: 0, x_mm: toMm(startPoint.x), y_mm: toMm(startPoint.y) },
-      { index: 1, isCorner: true, distFromStart_mm: toMm(length), x_mm: toMm(endPoint.x), y_mm: toMm(endPoint.y) },
+      { index: 0, isCorner: startOffset === 0, distFromStart_mm: toMm(d0), x_mm: toMm(startPoint.x + dx * t0), y_mm: toMm(startPoint.y + dy * t0) },
+      { index: 1, isCorner: endOffset === 0, distFromStart_mm: toMm(d1), x_mm: toMm(startPoint.x + dx * t1), y_mm: toMm(startPoint.y + dy * t1) },
     ]
     return {
       type,
@@ -185,13 +193,13 @@ function placementsBetweenCornerAnchors(startPoint, endPoint, type) {
 
   const placements = []
 
-  const { intervals, step, forced_step } = calculateStepAndIntervals(length, rules.step_min, rules.step_max)
+  const { intervals, step, forced_step } = calculateStepAndIntervals(usable, rules.step_min, rules.step_max)
   for (let i = 0; i <= intervals; i += 1) {
-    const distance = i * step
+    const distance = startOffset + i * step
     const t = clamp(distance / length, 0, 1)
     placements.push({
       index: i,
-      isCorner: i === 0 || i === intervals,
+      isCorner: (i === 0 && startOffset === 0) || (i === intervals && endOffset === 0),
       distFromStart_mm: toMm(distance),
       x_mm: toMm(startPoint.x + dx * t),
       y_mm: toMm(startPoint.y + dy * t),
@@ -381,6 +389,10 @@ export function computePolygonFasteners(vertices = [], sideConfig = {}, options 
         { x: cornerPoints[i].x_mm, y: cornerPoints[i].y_mm },
         { x: cornerPoints[(i + 1) % vertices.length].x_mm, y: cornerPoints[(i + 1) % vertices.length].y_mm },
         type,
+        {
+          startOffset_mm: Number(cfg.startOffset_mm || 0),
+          endOffset_mm: Number(cfg.endOffset_mm || 0),
+        },
       )
 
     // Для кривых сторон принудительно фиксируем углы в точках пересечения середины канта.

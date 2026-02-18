@@ -99,6 +99,7 @@ export default function App() {
   const [filmSeamOrientation, setFilmSeamOrientation] = useState('vertical')
 
   const [sideFasteners, setSideFasteners] = useState({ A: 'grommets', B: 'grommets', C: 'grommets', D: 'grommets' })
+  const [quadFasteners, setQuadFasteners] = useState({ top: 'grommets', sides: 'grommets', bottom: 'grommets' })
   const [sideKant, setSideKant] = useState({ A: 50, B: 50, C: 50, D: 50 })
   const [manualPlacements, setManualPlacements] = useState({})
   const [laborCost, setLaborCost] = useState(0)
@@ -151,21 +152,39 @@ export default function App() {
     return 2 + Math.floor(usableBetweenEdgeHooks / 1500)
   }, [hooksEnabled, geometryResult])
 
+  const effectiveSideFasteners = useMemo(() => {
+    if (geometryResult.vertices?.length === 4) {
+      return {
+        A: quadFasteners.top,
+        B: quadFasteners.sides,
+        C: quadFasteners.bottom,
+        D: quadFasteners.sides,
+      }
+    }
+    return sideFasteners
+  }, [geometryResult, quadFasteners, sideFasteners])
+
   const rawFasteners = useMemo(() => {
     if (!geometryResult.valid) return []
     const sideConfig = {}
     for (let i = 0; i < geometryResult.vertices.length; i += 1) {
       const side = SIDE_NAMES[i]
       sideConfig[side] = {
-        type: sideFasteners[side] || 'none',
+        type: effectiveSideFasteners[side] || 'none',
         cantaWidth_mm: Number(sideKant[side] || 50),
       }
     }
+    // Если снизу крепления нет, сдвигаем первый боковой крепёж от нижних углов на 140 мм.
+    if (geometryResult.vertices.length === 4 && (effectiveSideFasteners.C || 'none') === 'none') {
+      sideConfig.B = { ...(sideConfig.B || {}), endOffset_mm: 140 }
+      sideConfig.D = { ...(sideConfig.D || {}), startOffset_mm: 140 }
+    }
+
     return computePolygonFasteners(geometryResult.vertices, sideConfig, {
       cornerOffset_mm: 25,
       sideNames: SIDE_NAMES,
     })
-  }, [geometryResult, sideFasteners, sideKant])
+  }, [geometryResult, effectiveSideFasteners, sideKant])
 
   const fasteners = useMemo(() => {
     if (!manualMode) return rawFasteners
@@ -327,20 +346,49 @@ export default function App() {
 
         <section className="space-y-3 rounded-xl bg-white p-4 shadow">
           <h2 className="font-semibold">Крепления и кант по сторонам</h2>
-          {SIDE_NAMES.slice(0, geometryResult.vertices?.length || 4).map((side) => (
-            <div key={side} className="grid grid-cols-2 gap-2">
-              <label className="text-sm">Сторона {side}: крепление
-                <select className="mt-1 w-full rounded border p-2" value={sideFasteners[side]} onChange={(e) => setSideFasteners((p) => ({ ...p, [side]: e.target.value }))}>
+          {geometryResult.vertices?.length === 4 ? (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-sm">Верх (A): крепление
+                  <select className="mt-1 w-full rounded border p-2" value={quadFasteners.top} onChange={(e) => setQuadFasteners((p) => ({ ...p, top: e.target.value }))}>
+                    {Object.entries(FASTENER_OPTIONS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </label>
+                <label className="text-sm">Низ (C): крепление
+                  <select className="mt-1 w-full rounded border p-2" value={quadFasteners.bottom} onChange={(e) => setQuadFasteners((p) => ({ ...p, bottom: e.target.value }))}>
+                    {Object.entries(FASTENER_OPTIONS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </label>
+              </div>
+              <label className="block text-sm">Боковые (B и D): крепление
+                <select className="mt-1 w-full rounded border p-2" value={quadFasteners.sides} onChange={(e) => setQuadFasteners((p) => ({ ...p, sides: e.target.value }))}>
                   {Object.entries(FASTENER_OPTIONS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </label>
-              <label className="text-sm">Сторона {side}: кант, мм
-                <select className="mt-1 w-full rounded border p-2" value={sideKant[side]} onChange={(e) => setSideKant((p) => ({ ...p, [side]: Number(e.target.value) }))}>
-                  {KANT_OPTIONS.map((k) => <option key={k} value={k}>{k}</option>)}
-                </select>
-              </label>
-            </div>
-          ))}
+              {SIDE_NAMES.map((side) => (
+                <label key={side} className="block text-sm">Сторона {side}: кант, мм
+                  <select className="mt-1 w-full rounded border p-2" value={sideKant[side]} onChange={(e) => setSideKant((p) => ({ ...p, [side]: Number(e.target.value) }))}>
+                    {KANT_OPTIONS.map((k) => <option key={k} value={k}>{k}</option>)}
+                  </select>
+                </label>
+              ))}
+            </>
+          ) : (
+            SIDE_NAMES.slice(0, geometryResult.vertices?.length || 4).map((side) => (
+              <div key={side} className="grid grid-cols-2 gap-2">
+                <label className="text-sm">Сторона {side}: крепление
+                  <select className="mt-1 w-full rounded border p-2" value={sideFasteners[side]} onChange={(e) => setSideFasteners((p) => ({ ...p, [side]: e.target.value }))}>
+                    {Object.entries(FASTENER_OPTIONS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </label>
+                <label className="text-sm">Сторона {side}: кант, мм
+                  <select className="mt-1 w-full rounded border p-2" value={sideKant[side]} onChange={(e) => setSideKant((p) => ({ ...p, [side]: Number(e.target.value) }))}>
+                    {KANT_OPTIONS.map((k) => <option key={k} value={k}>{k}</option>)}
+                  </select>
+                </label>
+              </div>
+            ))
+          )}
 
           <label className="block text-sm">Стоимость работ
             <input type="number" className="mt-1 w-full rounded border p-2" value={laborCost} onChange={(e) => setLaborCost(Number(e.target.value || 0))} />

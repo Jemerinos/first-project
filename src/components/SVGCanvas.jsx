@@ -67,6 +67,7 @@ export default function SVGCanvas({
   hooksCount = 0,
   seamOrientation,
   rollLimitMm = 2600,
+  canvasClassName = 'h-[360px] w-full rounded-lg bg-slate-50',
 }) {
   if (!vertices.length) return <div className="rounded bg-slate-100 p-4 text-sm">Нет геометрии для отрисовки.</div>
 
@@ -95,7 +96,7 @@ export default function SVGCanvas({
   const seamVisible = seamOrientation === 'vertical' ? seamPosition !== null && seamPosition <= maxX : seamOrientation === 'horizontal' ? seamPosition !== null && seamPosition <= maxY : false
 
   return (
-    <svg viewBox={viewBox} className="h-[360px] w-full rounded-lg bg-slate-50">
+    <svg viewBox={viewBox} className={canvasClassName}>
       <defs>
         <clipPath id="shapeClip">
           <polygon points={vertices.map((v) => `${v.x},${v.y}`).join(' ')} />

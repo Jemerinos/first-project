@@ -211,6 +211,37 @@ describe('fasteners.v1', () => {
     expect(left.placements[0].distFromStart_mm).toBe(140)
   })
 
+
+  test('cornerOverrides смещают угловые точки на заданные along/inward значения', () => {
+    const vertices = [
+      { x: 0, y: 0 },
+      { x: 3000, y: 0 },
+      { x: 3000, y: 2000 },
+      { x: 0, y: 2000 },
+    ]
+    const sideConfig = {
+      A: { type: 'none', cantaWidth_mm: 50 },
+      B: { type: 'none', cantaWidth_mm: 50 },
+      C: {
+        type: 'locks',
+        cantaWidth_mm: 50,
+        cornerOverrides: {
+          start: { along_mm: 30, inward_mm: 25 },
+          end: { along_mm: 30, inward_mm: 25 },
+        },
+      },
+      D: { type: 'none', cantaWidth_mm: 50 },
+    }
+
+    const res = computePolygonFasteners(vertices, sideConfig, { cornerOffset_mm: 25, sideNames: ['A', 'B', 'C', 'D'] })
+    const bottom = res.find((s) => s.side === 'C')
+
+    expect(bottom.placements[0].x_mm).toBe(2945)
+    expect(bottom.placements[0].y_mm).toBe(1950)
+    expect(bottom.placements[bottom.placements.length - 1].x_mm).toBe(55)
+    expect(bottom.placements[bottom.placements.length - 1].y_mm).toBe(1950)
+  })
+
   test('Арочная сторона: точки через getTotalLength/getPointAtLength', () => {
     const arcPath = makeQuarterArcPath(500)
     const res = computePathPlacements(arcPath, {

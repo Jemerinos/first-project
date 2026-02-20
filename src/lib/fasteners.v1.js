@@ -130,7 +130,7 @@ function placementsFromLength(getPointAtDistance, getNormalAtDistance, length, o
     const normal = getNormalAtDistance(distance)
     placements.push({
       index: i,
-      isCorner: (i === 0 && startOffset === 0) || (i === intervals && endOffset === 0),
+      isCorner: i === 0 || i === intervals,
       distFromStart_mm: toMm(distance),
       x_mm: toMm(point.x + normal.x * inwardOffset),
       y_mm: toMm(point.y + normal.y * inwardOffset),
@@ -146,6 +146,39 @@ function placementsFromLength(getPointAtDistance, getNormalAtDistance, length, o
     forced_step,
     overlap_warning: false,
   }
+}
+
+function applyCornerOverrides(placements, startPoint, endPoint, centroid, cornerOverrides = {}) {
+  if (!Array.isArray(placements) || placements.length < 2) return placements
+  const sideLength = Math.hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y)
+  if (sideLength < EPS) return placements
+
+  const sideDir = normalize({ x: endPoint.x - startPoint.x, y: endPoint.y - startPoint.y })
+  const sideNormal = inwardNormal(startPoint, endPoint, centroid)
+
+  const result = [...placements]
+  if (result[0]?.isCorner && cornerOverrides.start) {
+    const along = clamp(Number(cornerOverrides.start.along_mm || 0), 0, sideLength)
+    const inward = Math.max(0, Number(cornerOverrides.start.inward_mm || 0))
+    result[0] = {
+      ...result[0],
+      x_mm: toMm(startPoint.x + sideDir.x * along + sideNormal.x * inward),
+      y_mm: toMm(startPoint.y + sideDir.y * along + sideNormal.y * inward),
+    }
+  }
+
+  const lastIndex = result.length - 1
+  if (result[lastIndex]?.isCorner && cornerOverrides.end) {
+    const along = clamp(Number(cornerOverrides.end.along_mm || 0), 0, sideLength)
+    const inward = Math.max(0, Number(cornerOverrides.end.inward_mm || 0))
+    result[lastIndex] = {
+      ...result[lastIndex],
+      x_mm: toMm(endPoint.x - sideDir.x * along + sideNormal.x * inward),
+      y_mm: toMm(endPoint.y - sideDir.y * along + sideNormal.y * inward),
+    }
+  }
+
+  return result
 }
 
 function placementsBetweenCornerAnchors(startPoint, endPoint, type, options = {}) {
@@ -394,6 +427,14 @@ export function computePolygonFasteners(vertices = [], sideConfig = {}, options 
           endOffset_mm: Number(cfg.endOffset_mm || 0),
         },
       )
+
+    segment.placements = applyCornerOverrides(
+      segment.placements,
+      { x: cornerPoints[i].x_mm, y: cornerPoints[i].y_mm },
+      { x: cornerPoints[(i + 1) % vertices.length].x_mm, y: cornerPoints[(i + 1) % vertices.length].y_mm },
+      centroid,
+      cfg.cornerOverrides,
+    )
 
     // Для кривых сторон принудительно фиксируем углы в точках пересечения середины канта.
     if (cfg.pathGeometry && segment.placements.length >= 2) {

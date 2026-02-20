@@ -102,6 +102,7 @@ export default function App() {
   const [quadFasteners, setQuadFasteners] = useState({ top: 'grommets', sides: 'grommets', bottom: 'grommets' })
   const [sideKant, setSideKant] = useState({ A: 50, B: 50, C: 50, D: 50 })
   const [manualPlacements, setManualPlacements] = useState({})
+  const [isCanvasZoomOpen, setIsCanvasZoomOpen] = useState(false)
   const [laborCost, setLaborCost] = useState(0)
   const [markupPercent, setMarkupPercent] = useState(30)
   const [calcResult, setCalcResult] = useState(null)
@@ -180,10 +181,36 @@ export default function App() {
       sideConfig.D = { ...(sideConfig.D || {}), startOffset_mm: 140 }
     }
 
-    return computePolygonFasteners(geometryResult.vertices, sideConfig, {
+    const computed = computePolygonFasteners(geometryResult.vertices, sideConfig, {
       cornerOffset_mm: 25,
       sideNames: SIDE_NAMES,
     })
+
+    if (geometryResult.vertices.length === 4 && (effectiveSideFasteners.C || 'none') === 'locks') {
+      const xs = geometryResult.vertices.map((v) => v.x)
+      const ys = geometryResult.vertices.map((v) => v.y)
+      const minX = Math.min(...xs)
+      const maxX = Math.max(...xs)
+      const maxY = Math.max(...ys)
+      const bottom = computed.find((side) => side.side === 'C')
+      if (bottom?.placements?.length >= 2) {
+        const lastIndex = bottom.placements.length - 1
+        bottom.placements[0] = {
+          ...bottom.placements[0],
+          x_mm: Math.round(maxX - 30),
+          y_mm: Math.round(maxY - 25),
+          isCorner: true,
+        }
+        bottom.placements[lastIndex] = {
+          ...bottom.placements[lastIndex],
+          x_mm: Math.round(minX + 30),
+          y_mm: Math.round(maxY - 25),
+          isCorner: true,
+        }
+      }
+    }
+
+    return computed
   }, [geometryResult, effectiveSideFasteners, sideKant])
 
   const fasteners = useMemo(() => {
@@ -405,18 +432,27 @@ export default function App() {
 
         <section className="space-y-3 rounded-xl bg-white p-4 shadow">
           <h2 className="font-semibold">SVG-чертёж</h2>
-          <SVGCanvas
-            vertices={geometryResult.vertices || []}
-            fasteners={fasteners}
-            triangleRightAngle={shape === 'triangle' && triangleMode === 'catheti' ? triangleRightAngle : undefined}
-            filmColor={selectedFilm.color}
-            kantColor={selectedKantColor.color}
-            sideKant={sideKant}
-            hooksEnabled={hooksEnabled}
-            hooksCount={hooksCount}
-            seamOrientation={overallSize.needsSeam ? filmSeamOrientation : undefined}
-            rollLimitMm={2600}
-          />
+          <button
+            type="button"
+            className="mb-2 rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-100"
+            onClick={() => setIsCanvasZoomOpen(true)}
+          >
+            Увеличить просмотр
+          </button>
+          <div className="cursor-zoom-in" onClick={() => setIsCanvasZoomOpen(true)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setIsCanvasZoomOpen(true)}>
+            <SVGCanvas
+              vertices={geometryResult.vertices || []}
+              fasteners={fasteners}
+              triangleRightAngle={shape === 'triangle' && triangleMode === 'catheti' ? triangleRightAngle : undefined}
+              filmColor={selectedFilm.color}
+              kantColor={selectedKantColor.color}
+              sideKant={sideKant}
+              hooksEnabled={hooksEnabled}
+              hooksCount={hooksCount}
+              seamOrientation={overallSize.needsSeam ? filmSeamOrientation : undefined}
+              rollLimitMm={2600}
+            />
+          </div>
           {geometryResult.valid && <p className="text-sm">Площадь изделия: {(Math.max(1, geometryResult.area_mm2 / 1_000_000)).toFixed(3)} м², Периметр: {(geometryResult.perimeter_mm / 1000).toFixed(3)} м</p>}
 
           <h3 className="pt-2 font-semibold">Расход фурнитуры</h3>
@@ -469,6 +505,33 @@ export default function App() {
           </table>
           <p className="text-sm">Материалы: {calcResult.cost.materialsCost} ₽ | Работы: {calcResult.cost.laborCost} ₽ | Наценка: {calcResult.cost.markupPercent}% | <strong>Итого: {calcResult.cost.totalPrice} ₽</strong></p>
         </section>
+      )}
+
+      {isCanvasZoomOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4" onClick={() => setIsCanvasZoomOpen(false)}>
+          <div className="relative h-[90vh] w-[95vw] rounded-xl bg-white p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="absolute right-4 top-4 rounded bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-700"
+              onClick={() => setIsCanvasZoomOpen(false)}
+            >
+              Закрыть
+            </button>
+            <SVGCanvas
+              vertices={geometryResult.vertices || []}
+              fasteners={fasteners}
+              triangleRightAngle={shape === 'triangle' && triangleMode === 'catheti' ? triangleRightAngle : undefined}
+              filmColor={selectedFilm.color}
+              kantColor={selectedKantColor.color}
+              sideKant={sideKant}
+              hooksEnabled={hooksEnabled}
+              hooksCount={hooksCount}
+              seamOrientation={overallSize.needsSeam ? filmSeamOrientation : undefined}
+              rollLimitMm={2600}
+              canvasClassName="h-full w-full rounded-lg bg-slate-50"
+            />
+          </div>
+        </div>
       )}
     </main>
   )

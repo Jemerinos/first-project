@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import TriangleInput from './components/TriangleInput'
 import TrapezoidInput from './components/TrapezoidInput'
 import SVGCanvas from './components/SVGCanvas'
-import { computePolygonFasteners } from './lib/fasteners.v1'
-import { computeRightTriangleFromCatheti, computeTriangleFromSides, computeTrapezoid } from './lib/geometry.v1'
+import { computeAllFasteners } from './lib/fasteners.js'
+import { computeGeometry } from './lib/geometry.js'
 import { assembleMaterials, estimateCosts, RULES_VERSION } from './lib/calculator.rules.v1'
 
 const SIDE_NAMES = ['A', 'B', 'C', 'D']
@@ -30,22 +30,6 @@ const KANT_COLOR_OPTIONS = [
   { id: 'red', label: 'Красный', color: '#b91c1c' },
 ]
 
-function geometryFromRectangle(width, height) {
-  if (width <= 0 || height <= 0) return { valid: false, reason: 'Ширина и высота должны быть больше 0.' }
-  return {
-    valid: true,
-    vertices: [
-      { x: 0, y: 0 },
-      { x: width, y: 0 },
-      { x: width, y: height },
-      { x: 0, y: height },
-    ],
-    area_mm2: width * height,
-    perimeter_mm: 2 * (width + height),
-    shapeType: 'rectangle',
-  }
-}
-
 function sideLengths(vertices) {
   const names = ['A', 'B', 'C', 'D']
   const result = {}
@@ -55,32 +39,6 @@ function sideLengths(vertices) {
     result[names[i]] = Math.hypot(b.x - a.x, b.y - a.y)
   }
   return result
-}
-
-function buildRightTriangleByAngle(width, height, rightAngle) {
-  const w = Number(width)
-  const h = Number(height)
-  if (!(w > 0 && h > 0)) return null
-
-  if (rightAngle === 'B') {
-    return [
-      { x: -w, y: 0 },
-      { x: 0, y: 0 },
-      { x: 0, y: h },
-    ]
-  }
-  if (rightAngle === 'C') {
-    return [
-      { x: 0, y: -h },
-      { x: w, y: 0 },
-      { x: 0, y: 0 },
-    ]
-  }
-  return [
-    { x: 0, y: 0 },
-    { x: w, y: 0 },
-    { x: 0, y: h },
-  ]
 }
 
 export default function App() {
@@ -103,6 +61,7 @@ export default function App() {
   const [sideKant, setSideKant] = useState({ A: 50, B: 50, C: 50, D: 50 })
   const [manualPlacements, setManualPlacements] = useState({})
   const [isCanvasZoomOpen, setIsCanvasZoomOpen] = useState(false)
+  const [debugMode, setDebugMode] = useState(false)
   const [laborCost, setLaborCost] = useState(0)
   const [markupPercent, setMarkupPercent] = useState(30)
   const [calcResult, setCalcResult] = useState(null)
@@ -113,15 +72,30 @@ export default function App() {
   const geometryResult = useMemo(() => {
     if (shape === 'triangle') {
       if (triangleMode === 'catheti') {
-        const baseResult = computeRightTriangleFromCatheti(triangleCatheti.width, triangleCatheti.height)
-        if (!baseResult.valid) return baseResult
-        const oriented = buildRightTriangleByAngle(triangleCatheti.width, triangleCatheti.height, triangleRightAngle)
-        return oriented ? { ...baseResult, vertices: oriented } : baseResult
+        return computeGeometry('triangle', {
+          mode: 'catheti',
+          width: triangleCatheti.width,
+          height: triangleCatheti.height,
+          rightAngle: triangleRightAngle,
+        })
       }
-      return computeTriangleFromSides(triangleSides.a, triangleSides.b, triangleSides.c)
+      return computeGeometry('triangle', {
+        mode: 'sides',
+        a: triangleSides.a,
+        b: triangleSides.b,
+        c: triangleSides.c,
+      })
     }
-    if (shape === 'trapezoid') return computeTrapezoid(trapezoid.baseA, trapezoid.baseB, trapezoid.left, trapezoid.right, trapezoidFlags)
-    return geometryFromRectangle(Number(rect.width), Number(rect.height))
+    if (shape === 'trapezoid') {
+      return computeGeometry('trapezoid', {
+        baseA: trapezoid.baseA,
+        baseB: trapezoid.baseB,
+        left: trapezoid.left,
+        right: trapezoid.right,
+        flags: trapezoidFlags,
+      })
+    }
+    return computeGeometry('rectangle', { width: Number(rect.width), height: Number(rect.height) })
   }, [shape, triangleMode, triangleSides, triangleCatheti, triangleRightAngle, trapezoid, trapezoidFlags, rect])
 
 
@@ -181,7 +155,7 @@ export default function App() {
       sideConfig.D = { ...(sideConfig.D || {}), startOffset_mm: 140 }
     }
 
-    const computed = computePolygonFasteners(geometryResult.vertices, sideConfig, {
+    const computed = computeAllFasteners(geometryResult.vertices, sideConfig, {
       cornerOffset_mm: 25,
       sideNames: SIDE_NAMES,
     })
@@ -354,6 +328,10 @@ export default function App() {
             <input type="checkbox" checked={manualMode} onChange={(e) => setManualMode(e.target.checked)} />
             Редактировать люверсы вручную
           </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} />
+            Debug-режим (вершины/индексы/дистанции)
+          </label>
 
 
           {overallSize.needsSeam && (
@@ -451,6 +429,7 @@ export default function App() {
               hooksCount={hooksCount}
               seamOrientation={overallSize.needsSeam ? filmSeamOrientation : undefined}
               rollLimitMm={2600}
+              debug={debugMode}
             />
           </div>
           {geometryResult.valid && <p className="text-sm">Площадь изделия: {(Math.max(1, geometryResult.area_mm2 / 1_000_000)).toFixed(3)} м², Периметр: {(geometryResult.perimeter_mm / 1000).toFixed(3)} м</p>}
@@ -494,6 +473,30 @@ export default function App() {
         </section>
       )}
 
+
+      {fasteners.length > 0 && (
+        <section className="space-y-3 rounded-xl bg-white p-4 shadow">
+          <h2 className="text-lg font-semibold">Таблица размещения крепежей</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full border text-xs">
+              <thead className="bg-slate-100"><tr><th className="border p-1">Сторона</th><th className="border p-1">№</th><th className="border p-1">distFromStart</th><th className="border p-1">x</th><th className="border p-1">y</th><th className="border p-1">forcedStep</th></tr></thead>
+              <tbody>
+                {fasteners.flatMap((side) => side.placements.map((p, idx) => (
+                  <tr key={`place-${side.side}-${idx}`}>
+                    <td className="border p-1">{side.side}</td>
+                    <td className="border p-1">{idx + 1}</td>
+                    <td className="border p-1">{p.distFromStart_mm}</td>
+                    <td className="border p-1">{p.x_mm}</td>
+                    <td className="border p-1">{p.y_mm}</td>
+                    <td className="border p-1">{side.forced_step ? 'true' : 'false'}</td>
+                  </tr>
+                )))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {calcResult && (
         <section className="space-y-3 rounded-xl bg-white p-4 shadow">
           <h2 className="text-xl font-semibold">Спецификация</h2>
@@ -529,6 +532,7 @@ export default function App() {
               seamOrientation={overallSize.needsSeam ? filmSeamOrientation : undefined}
               rollLimitMm={2600}
               canvasClassName="h-full w-full rounded-lg bg-slate-50"
+              debug={debugMode}
             />
           </div>
         </div>

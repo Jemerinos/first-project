@@ -68,6 +68,7 @@ export default function SVGCanvas({
   seamOrientation,
   rollLimitMm = 2600,
   canvasClassName = 'h-[360px] w-full rounded-lg bg-slate-50',
+  debug = false,
 }) {
   if (!vertices.length) return <div className="rounded bg-slate-100 p-4 text-sm">Нет геометрии для отрисовки.</div>
 
@@ -196,10 +197,23 @@ export default function SVGCanvas({
         return (
           <g key={`${side.side}-${idx}`}>
             {renderFastenerShape(vertices, side, p, idx)}
+            {debug && (
+              <g>
+                <text x={p.x_mm + 8} y={p.y_mm - 8} className="fill-slate-700 text-[12px]">{`${side.side}-${idx + 1}`}</text>
+                <text x={p.x_mm + 8} y={p.y_mm + 8} className="fill-slate-600 text-[10px]">{`${p.distFromStart_mm}мм`}</text>
+              </g>
+            )}
             <title>{`Сторона ${side.side}; dist=${p.distFromStart_mm} мм; ${p.isCorner ? 'угловой' : 'внутренний'}`}</title>
           </g>
         )
       })}
+
+      {debug && vertices.map((v, i) => (
+        <g key={`dbg-v-${i}`}>
+          <circle cx={v.x} cy={v.y} r="6" fill="#1d4ed8" />
+          <text x={v.x + 8} y={v.y - 8} className="fill-blue-800 text-[12px]">{`V${i}`}</text>
+        </g>
+      ))}
     </svg>
   )
 }

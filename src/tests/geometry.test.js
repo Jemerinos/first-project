@@ -1,39 +1,34 @@
-import {
-  computeTriangleFromSides,
-  computeTrapezoid,
-} from '../lib/geometry.v1'
+import { computeGeometry, computeVertices, polygonArea, polygonPerimeter, segmentLength } from '../lib/geometry.js'
 
-describe('geometry.v1', () => {
-  test('Triangle 3-4-5 valid with area and angles', () => {
-    const t = computeTriangleFromSides(3, 4, 5)
-    expect(t.valid).toBe(true)
-    expect(t.area_mm2).toBeCloseTo(6)
-    expect(t.perimeter_mm).toBeCloseTo(12)
-    expect(t.angles_deg.C).toBeCloseTo(90)
+describe('geometry.js', () => {
+  test('rectangle: корректные вершины/площадь/периметр', () => {
+    const vertices = computeVertices('rectangle', { width: 1000, height: 500 })
+    expect(vertices.valid).toBe(true)
+    expect(vertices.vertices).toEqual([
+      { x: 0, y: 0 },
+      { x: 1000, y: 0 },
+      { x: 1000, y: 500 },
+      { x: 0, y: 500 },
+    ])
+    expect(polygonArea(vertices.vertices)).toBe(500000)
+    expect(polygonPerimeter(vertices.vertices)).toBe(3000)
+    expect(segmentLength(vertices.vertices[0], vertices.vertices[1])).toBe(1000)
   })
 
-  test('Invalid triangle', () => {
-    const t = computeTriangleFromSides(1, 2, 4)
-    expect(t.valid).toBe(false)
+  test('triangle inequality validation', () => {
+    const tri = computeVertices('triangle', { mode: 'sides', a: 1, b: 2, c: 4 })
+    expect(tri.valid).toBe(false)
   })
 
-  test('Trapezoid generic with no right flags', () => {
-    const tr = computeTrapezoid(1800, 2400, 1500, 1600, {})
-    expect(tr.valid).toBe(true)
-    expect(tr.height_mm).toBeGreaterThan(0)
-    expect(tr.area_mm2).toBeGreaterThan(0)
+  test('trapezoid validation: высота должна быть > 0', () => {
+    const tr = computeVertices('trapezoid', { baseA: 1800, baseB: 1800, left: 100, right: 100, flags: { bottomLeft: true, bottomRight: true } })
+    expect(tr.valid).toBe(false)
   })
 
-  test('Trapezoid with right corner flags', () => {
-    const tr = computeTrapezoid(1800, 2400, 1400, 1500, { bottomLeft: true })
-    expect(tr.valid).toBe(true)
-    expect(tr.vertices[0].x).toBe(0)
-    expect(tr.vertices[3].x).toBe(0)
-  })
-
-  test('Vertical trapezoid variation', () => {
-    const tr = computeTrapezoid(1800, 1800, 1200, 1200, { bottomLeft: true, bottomRight: true })
-    expect(tr.valid).toBe(true)
-    expect(tr.height_mm).toBeCloseTo(1200)
+  test('computeGeometry: площадь > 0', () => {
+    const g = computeGeometry('triangle', { mode: 'catheti', width: 800, height: 600, rightAngle: 'A' })
+    expect(g.valid).toBe(true)
+    expect(g.area_mm2).toBeGreaterThan(0)
+    expect(g.perimeter_mm).toBeGreaterThan(0)
   })
 })

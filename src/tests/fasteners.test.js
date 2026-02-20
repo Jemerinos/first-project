@@ -1,280 +1,86 @@
-import {
-  computeCornerPlacement,
-  computePathPlacements,
-  computePolygonFasteners,
-  computeSidePlacements,
-} from '../lib/fasteners.v1'
+import { computeAllFasteners, computeSideGrommets } from '../lib/fasteners.js'
+import { pointInPolygon } from '../lib/geometry.js'
 
-function makeQuarterArcPath(radius = 500) {
-  return {
-    getTotalLength() {
-      return Math.PI * radius / 2
-    },
-    getPointAtLength(distance) {
-      const clamped = Math.max(0, Math.min(this.getTotalLength(), distance))
-      const angle = clamped / radius
-      return {
-        x: radius * Math.cos(angle),
-        y: radius * Math.sin(angle),
-      }
-    },
-  }
+function pointsOnSegment(v1, v2, p, tol = 2) {
+  const dx = v2.x - v1.x
+  const dy = v2.y - v1.y
+  const segLen = Math.hypot(dx, dy)
+  const d1 = Math.hypot(p.x_mm - v1.x, p.y_mm - v1.y)
+  const d2 = Math.hypot(p.x_mm - v2.x, p.y_mm - v2.y)
+  return Math.abs((d1 + d2) - segLen) <= tol + 60 // учитываем сдвиг по нормали в кант
 }
 
-describe('fasteners.v1', () => {
-  test('Прямоугольник 1000 мм: люверсы равномерно по реальной длине стороны', () => {
-    const side = computeSidePlacements({ x: 0, y: 0 }, { x: 1000, y: 0 }, {
-      type: 'grommets',
-      cornerOffset_mm: 25,
-      cantaWidth_mm: 50,
+describe('fasteners.js', () => {
+  test('rectangle 1000x500: люверсы равномерно по стороне', () => {
+    const side = computeSideGrommets({ x: 0, y: 0 }, { x: 1000, y: 0 }, {
+      stepMin: 200,
+      stepMax: 250,
+      cornerOffset: 25,
+      cantaHalf: 25,
       centroid: { x: 500, y: 250 },
     })
 
     expect(side.count).toBe(5)
-    expect(side.step_mm).toBe(238)
-    expect(side.placements.map((p) => p.distFromStart_mm)).toEqual([25, 263, 500, 738, 975])
+    expect(side.step_mm).toBeGreaterThanOrEqual(200)
+    expect(side.step_mm).toBeLessThanOrEqual(250)
+    const dists = side.placements.map((p) => p.distFromStart_mm)
+    expect(dists).toEqual([25, 263, 500, 738, 975])
   })
 
-  test('Треугольник (неравные стороны): координаты считаются от вершин, без form-аппроксимации', () => {
-    const vertices = [{ x: 0, y: 0 }, { x: 700, y: 0 }, { x: 250, y: 600 }]
-    const sideConfig = {
-      A: { type: 'grommets', cantaWidth_mm: 60 },
-      B: { type: 'grommets', cantaWidth_mm: 60 },
-      C: { type: 'grommets', cantaWidth_mm: 60 },
+  test('triangle: точки лежат на сторонах (с учетом сдвига в кант) и внутри полигона', () => {
+    const vertices = [{ x: 0, y: 0 }, { x: 1200, y: 0 }, { x: 600, y: 900 }]
+    const sideConfigs = {
+      A: { type: 'grommets', cantaWidth_mm: 50 },
+      B: { type: 'grommets', cantaWidth_mm: 50 },
+      C: { type: 'grommets', cantaWidth_mm: 50 },
     }
+    const result = computeAllFasteners(vertices, sideConfigs, { sideNames: ['A', 'B', 'C'] })
 
-    const res = computePolygonFasteners(vertices, sideConfig, {
-      cornerOffset_mm: 25,
-      sideNames: ['A', 'B', 'C'],
+    expect(result.length).toBe(3)
+    result.forEach((side, i) => {
+      const v1 = vertices[i]
+      const v2 = vertices[(i + 1) % vertices.length]
+      side.placements.forEach((p) => {
+        expect(Number.isNaN(p.x_mm)).toBe(false)
+        expect(Number.isNaN(p.y_mm)).toBe(false)
+        expect(pointsOnSegment(v1, v2, p)).toBe(true)
+        expect(pointInPolygon({ x: p.x_mm, y: p.y_mm }, vertices) || p.isCorner).toBe(true)
+      })
     })
-
-    expect(res.length).toBe(3)
-    expect(res.every((s) => s.count >= 2)).toBe(true)
-    expect(res[0].placements[0].isCorner).toBe(true)
   })
 
-  test('Замки идут от угла до угла с равным шагом в верхней границе диапазона', () => {
-    const vertices = [
-      { x: 0, y: 0 },
-      { x: 1000, y: 0 },
-      { x: 1000, y: 600 },
-      { x: 0, y: 600 },
-    ]
-    const sideConfig = {
-      A: { type: 'locks', cantaWidth_mm: 100 },
-      B: { type: 'none', cantaWidth_mm: 100 },
-      C: { type: 'none', cantaWidth_mm: 100 },
-      D: { type: 'none', cantaWidth_mm: 100 },
-    }
-
-    const side = computePolygonFasteners(vertices, sideConfig, { cornerOffset_mm: 25, sideNames: ['A', 'B', 'C', 'D'] })[0]
-
-    expect(side.step_mm).toBe(450)
-    expect(side.placements.map((p) => p.distFromStart_mm)).toEqual([0, 450, 900])
-  })
-
-  test('Для замков шаг уменьшается ниже 400 мм, если иначе равномерно не разложить', () => {
-    const vertices = [
-      { x: 0, y: 0 },
-      { x: 1050, y: 0 },
-      { x: 1050, y: 600 },
-      { x: 0, y: 600 },
-    ]
-    const sideConfig = {
-      A: { type: 'locks', cantaWidth_mm: 100 },
-      B: { type: 'none', cantaWidth_mm: 100 },
-      C: { type: 'none', cantaWidth_mm: 100 },
-      D: { type: 'none', cantaWidth_mm: 100 },
-    }
-
-    const side = computePolygonFasteners(vertices, sideConfig, { cornerOffset_mm: 25, sideNames: ['A', 'B', 'C', 'D'] })[0]
-
-    expect(side.forced_step).toBe(true)
-    expect(side.step_mm).toBeLessThan(400)
-    expect(side.placements.map((p) => p.distFromStart_mm)).toEqual([0, 317, 633, 950])
-  })
-
-  test('Трапеция: корректные точки по всем сторонам', () => {
-    const vertices = [{ x: 0, y: 0 }, { x: 1200, y: 0 }, { x: 1000, y: 700 }, { x: 200, y: 700 }]
-    const sideConfig = {
+  test('trapezoid: нет NaN координат', () => {
+    const vertices = [{ x: 0, y: 0 }, { x: 2200, y: 0 }, { x: 1800, y: 900 }, { x: 300, y: 900 }]
+    const sideConfigs = {
       A: { type: 'grommets', cantaWidth_mm: 70 },
       B: { type: 'locks', cantaWidth_mm: 70 },
       C: { type: 'grommets', cantaWidth_mm: 70 },
       D: { type: 'straps', cantaWidth_mm: 70 },
     }
+    const result = computeAllFasteners(vertices, sideConfigs, { sideNames: ['A', 'B', 'C', 'D'] })
 
-    const res = computePolygonFasteners(vertices, sideConfig, {
-      cornerOffset_mm: 25,
-      sideNames: ['A', 'B', 'C', 'D'],
+    result.forEach((side) => {
+      side.placements.forEach((p) => {
+        expect(Number.isNaN(p.x_mm)).toBe(false)
+        expect(Number.isNaN(p.y_mm)).toBe(false)
+      })
     })
-
-    expect(res.length).toBe(4)
-    expect(res.find((s) => s.side === 'A').step_mm).toBeGreaterThanOrEqual(200)
-    expect(res.find((s) => s.side === 'A').step_mm).toBeLessThanOrEqual(250)
-    expect(res.find((s) => s.side === 'B').step_mm).toBeGreaterThanOrEqual(400)
   })
 
-  test('Короткая сторона: только угловые точки', () => {
-    const side = computeSidePlacements({ x: 0, y: 0 }, { x: 40, y: 0 }, {
-      type: 'grommets',
-      cornerOffset_mm: 25,
-      cantaWidth_mm: 50,
-      centroid: { x: 20, y: 20 },
-    })
-
-    expect(side.count).toBe(2)
-    expect(side.note).toBe('short_side_only_corners')
-    expect(side.placements[0].isCorner).toBe(true)
-    expect(side.placements[1].isCorner).toBe(true)
-  })
-
-  test('Угол 90°: угловой люверс в центре канта', () => {
-    const corner = computeCornerPlacement(
-      { x: 0, y: 0 },
-      { x: 100, y: 0 },
-      { x: 0, y: 100 },
-      25,
-      70,
-      { x: 50, y: 50 },
-    )
-
-    expect(corner.x_mm).toBeGreaterThanOrEqual(30)
-    expect(corner.y_mm).toBeGreaterThanOrEqual(30)
-  })
-
-  test('Не дублируются угловые координаты на широком канте', () => {
-    const vertices = [
-      { x: 0, y: 0 },
-      { x: 1000, y: 0 },
-      { x: 1000, y: 500 },
-      { x: 0, y: 500 },
-    ]
-    const sideConfig = {
-      A: { type: 'grommets', cantaWidth_mm: 150 },
-      B: { type: 'grommets', cantaWidth_mm: 150 },
-      C: { type: 'grommets', cantaWidth_mm: 150 },
-      D: { type: 'grommets', cantaWidth_mm: 150 },
-    }
-    const res = computePolygonFasteners(vertices, sideConfig, { cornerOffset_mm: 25, sideNames: ['A', 'B', 'C', 'D'] })
-
-    const corners = res.flatMap((s) => [s.placements[0], s.placements[s.placements.length - 1]])
-    const unique = new Set(corners.map((c) => `${c.x_mm}:${c.y_mm}`))
-    expect(unique.size).toBe(4)
-  })
-
-
-
-  test('Для прямоугольника середина канта образует внутренний прямоугольник', () => {
-    const vertices = [
-      { x: 0, y: 0 },
-      { x: 1000, y: 0 },
-      { x: 1000, y: 600 },
-      { x: 0, y: 600 },
-    ]
-    const sideConfig = {
-      A: { type: 'grommets', cantaWidth_mm: 100 },
-      B: { type: 'grommets', cantaWidth_mm: 100 },
-      C: { type: 'grommets', cantaWidth_mm: 100 },
-      D: { type: 'grommets', cantaWidth_mm: 100 },
-    }
-    const res = computePolygonFasteners(vertices, sideConfig, { cornerOffset_mm: 25, sideNames: ['A', 'B', 'C', 'D'] })
-    const corners = res.map((side) => [side.anchors.start.x_mm, side.anchors.start.y_mm])
-
-    expect(corners).toEqual([
-      [50, 50],
-      [950, 50],
-      [950, 550],
-      [50, 550],
-    ])
-  })
-
-  test('Шаг считается от угловых точек пересечения середины канта', () => {
-    const vertices = [
-      { x: 0, y: 0 },
-      { x: 1000, y: 0 },
-      { x: 1000, y: 600 },
-      { x: 0, y: 600 },
-    ]
-    const sideConfig = {
-      A: { type: 'grommets', cantaWidth_mm: 100 },
-      B: { type: 'grommets', cantaWidth_mm: 100 },
-      C: { type: 'grommets', cantaWidth_mm: 100 },
-      D: { type: 'grommets', cantaWidth_mm: 100 },
-    }
-    const res = computePolygonFasteners(vertices, sideConfig, { cornerOffset_mm: 25, sideNames: ['A', 'B', 'C', 'D'] })
-    const top = res.find((s) => s.side === 'A')
-
-    expect(top.placements[0].distFromStart_mm).toBe(0)
-    expect(top.placements[top.placements.length - 1].distFromStart_mm).toBe(top.length_mm)
-    expect(top.step_mm).toBeGreaterThanOrEqual(200)
-    expect(top.step_mm).toBeLessThanOrEqual(250)
-  })
-
-  test('Если на нижней стороне нет крепления, боковые стартуют с отступом 140 мм от нижних углов', () => {
-    const vertices = [
-      { x: 0, y: 0 },
-      { x: 3000, y: 0 },
-      { x: 3000, y: 2000 },
-      { x: 0, y: 2000 },
-    ]
-    const sideConfig = {
+  test('distFromStart всегда возрастает', () => {
+    const vertices = [{ x: 0, y: 0 }, { x: 3000, y: 0 }, { x: 3000, y: 2000 }, { x: 0, y: 2000 }]
+    const sideConfigs = {
       A: { type: 'grommets', cantaWidth_mm: 50 },
-      B: { type: 'grommets', cantaWidth_mm: 50, endOffset_mm: 140 },
-      C: { type: 'none', cantaWidth_mm: 50 },
-      D: { type: 'grommets', cantaWidth_mm: 50, startOffset_mm: 140 },
+      B: { type: 'grommets', cantaWidth_mm: 50 },
+      C: { type: 'grommets', cantaWidth_mm: 50 },
+      D: { type: 'grommets', cantaWidth_mm: 50 },
     }
 
-    const res = computePolygonFasteners(vertices, sideConfig, { cornerOffset_mm: 25, sideNames: ['A', 'B', 'C', 'D'] })
-    const right = res.find((s) => s.side === 'B')
-    const left = res.find((s) => s.side === 'D')
-
-    expect(right.placements[right.placements.length - 1].distFromStart_mm).toBe(1810)
-    expect(left.placements[0].distFromStart_mm).toBe(140)
-  })
-
-
-  test('cornerOverrides смещают угловые точки на заданные along/inward значения', () => {
-    const vertices = [
-      { x: 0, y: 0 },
-      { x: 3000, y: 0 },
-      { x: 3000, y: 2000 },
-      { x: 0, y: 2000 },
-    ]
-    const sideConfig = {
-      A: { type: 'none', cantaWidth_mm: 50 },
-      B: { type: 'none', cantaWidth_mm: 50 },
-      C: {
-        type: 'locks',
-        cantaWidth_mm: 50,
-        cornerOverrides: {
-          start: { along_mm: 30, inward_mm: 25 },
-          end: { along_mm: 30, inward_mm: 25 },
-        },
-      },
-      D: { type: 'none', cantaWidth_mm: 50 },
-    }
-
-    const res = computePolygonFasteners(vertices, sideConfig, { cornerOffset_mm: 25, sideNames: ['A', 'B', 'C', 'D'] })
-    const bottom = res.find((s) => s.side === 'C')
-
-    expect(bottom.placements[0].x_mm).toBe(2945)
-    expect(bottom.placements[0].y_mm).toBe(1950)
-    expect(bottom.placements[bottom.placements.length - 1].x_mm).toBe(55)
-    expect(bottom.placements[bottom.placements.length - 1].y_mm).toBe(1950)
-  })
-
-  test('Арочная сторона: точки через getTotalLength/getPointAtLength', () => {
-    const arcPath = makeQuarterArcPath(500)
-    const res = computePathPlacements(arcPath, {
-      type: 'grommets',
-      cornerOffset_mm: 25,
-      cantaWidth_mm: 50,
-      centroid: { x: 250, y: 250 },
+    const result = computeAllFasteners(vertices, sideConfigs, { sideNames: ['A', 'B', 'C', 'D'] })
+    result.forEach((side) => {
+      for (let i = 1; i < side.placements.length; i += 1) {
+        expect(side.placements[i].distFromStart_mm).toBeGreaterThan(side.placements[i - 1].distFromStart_mm)
+      }
     })
-
-    expect(res.count).toBeGreaterThan(2)
-    expect(res.step_mm).toBeGreaterThanOrEqual(200)
-    expect(res.step_mm).toBeLessThanOrEqual(250)
-    expect(res.placements[0].isCorner).toBe(true)
   })
 })

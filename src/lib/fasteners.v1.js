@@ -442,6 +442,28 @@ export function computePolygonFasteners(vertices = [], sideConfig = {}, options 
         },
       )
 
+    // Жестко привязываем угловые точки к пересечениям линий середины канта,
+    // чтобы на стыках не было «кривого» сдвига из-за накопления округлений шага.
+    if (segment.placements.length >= 2) {
+      const first = segment.placements[0]
+      const lastIndex = segment.placements.length - 1
+      const last = segment.placements[lastIndex]
+      if (first?.isCorner) {
+        segment.placements[0] = {
+          ...first,
+          x_mm: cornerPoints[i].x_mm,
+          y_mm: cornerPoints[i].y_mm,
+        }
+      }
+      if (last?.isCorner) {
+        segment.placements[lastIndex] = {
+          ...last,
+          x_mm: cornerPoints[(i + 1) % vertices.length].x_mm,
+          y_mm: cornerPoints[(i + 1) % vertices.length].y_mm,
+        }
+      }
+    }
+
     segment.placements = applyCornerOverrides(
       segment.placements,
       { x: cornerPoints[i].x_mm, y: cornerPoints[i].y_mm },

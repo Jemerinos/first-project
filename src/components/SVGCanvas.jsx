@@ -91,6 +91,26 @@ export default function SVGCanvas({
     : []
 
   const renderedKeys = new Set()
+  const typePriority = { locks: 3, straps: 2, grommets: 1 }
+
+  const uniquePlacements = []
+  fasteners.forEach((side) => {
+    ;(side.placements || []).forEach((placement, idx) => {
+      const key = `${Math.round(placement.x_mm)}:${Math.round(placement.y_mm)}`
+      const existingIndex = uniquePlacements.findIndex((it) => it.key === key)
+      const candidate = { key, side, placement, idx }
+      if (existingIndex < 0) {
+        uniquePlacements.push(candidate)
+        return
+      }
+      const existing = uniquePlacements[existingIndex]
+      const existingPriority = typePriority[existing.side.type] || 0
+      const candidatePriority = typePriority[side.type] || 0
+      if (candidatePriority > existingPriority) {
+        uniquePlacements[existingIndex] = candidate
+      }
+    })
+  })
 
   const seamPosition = seamOrientation === 'vertical' ? minX + rollLimitMm : seamOrientation === 'horizontal' ? minY + rollLimitMm : null
   const seamVisible = seamOrientation === 'vertical' ? seamPosition !== null && seamPosition <= maxX : seamOrientation === 'horizontal' ? seamPosition !== null && seamPosition <= maxY : false
@@ -169,7 +189,7 @@ export default function SVGCanvas({
         <line key={`hook-${idx}`} x1={x} y1={minY} x2={x} y2={hookMidY} stroke="#334155" strokeWidth="5" strokeLinecap="butt" />
       ))}
 
-      {fasteners.flatMap((side) => (side.placements || []).map((p, idx) => {
+      {uniquePlacements.map(({ side, placement: p, idx }) => {
         const key = `${Math.round(p.x_mm)}:${Math.round(p.y_mm)}`
         if (renderedKeys.has(key)) return null
         renderedKeys.add(key)
@@ -179,7 +199,7 @@ export default function SVGCanvas({
             <title>{`Сторона ${side.side}; dist=${p.distFromStart_mm} мм; ${p.isCorner ? 'угловой' : 'внутренний'}`}</title>
           </g>
         )
-      }))}
+      })}
     </svg>
   )
 }

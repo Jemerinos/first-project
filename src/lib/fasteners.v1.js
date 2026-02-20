@@ -46,19 +46,31 @@ function lineIntersection(p1, d1, p2, d2) {
   return { x: p1.x + d1.x * t, y: p1.y + d1.y * t }
 }
 
-function calculateStepAndIntervals(usable, stepMin, stepMax) {
+function calculateStepAndIntervals(usable, stepMin, stepMax, options = {}) {
+  const { allowBelowMin = false } = options
   if (usable <= 0) return { intervals: 1, step: 0, forced_step: false }
 
-  let intervals = Math.floor(usable / stepMax)
+  let intervals = Math.ceil(usable / stepMax)
   if (intervals < 1) intervals = 1
   const maxIntervals = Math.max(1, Math.floor(usable / stepMin))
 
-  while (intervals <= maxIntervals) {
-    const step = usable / intervals
-    if (step >= stepMin && step <= stepMax) {
-      return { intervals, step, forced_step: false }
+  if (intervals <= maxIntervals) {
+    while (intervals <= maxIntervals) {
+      const step = usable / intervals
+      if (step >= stepMin && step <= stepMax) {
+        return { intervals, step, forced_step: false }
+      }
+      intervals += 1
     }
-    intervals += 1
+  }
+
+  if (allowBelowMin) {
+    const loweredIntervals = Math.max(1, Math.ceil(usable / stepMax))
+    return {
+      intervals: loweredIntervals,
+      step: usable / loweredIntervals,
+      forced_step: true,
+    }
   }
 
   const forcedIntervals = Math.max(1, maxIntervals)
@@ -77,6 +89,7 @@ function placementsFromLength(getPointAtDistance, getNormalAtDistance, length, o
   } = options
 
   const rules = FASTENER_RULES[type]
+  const allowBelowMin = type === 'locks' || type === 'straps'
   if (!rules || length <= 0) {
     return {
       type,
@@ -123,7 +136,7 @@ function placementsFromLength(getPointAtDistance, getNormalAtDistance, length, o
 
   const placements = []
 
-  const { intervals, step, forced_step } = calculateStepAndIntervals(usable, rules.step_min, rules.step_max)
+  const { intervals, step, forced_step } = calculateStepAndIntervals(usable, rules.step_min, rules.step_max, { allowBelowMin })
   for (let i = 0; i <= intervals; i += 1) {
     const distance = C + i * step
     const point = getPointAtDistance(distance)
@@ -183,6 +196,7 @@ function applyCornerOverrides(placements, startPoint, endPoint, centroid, corner
 
 function placementsBetweenCornerAnchors(startPoint, endPoint, type, options = {}) {
   const rules = FASTENER_RULES[type]
+  const allowBelowMin = type === 'locks' || type === 'straps'
   const dx = endPoint.x - startPoint.x
   const dy = endPoint.y - startPoint.y
   const length = Math.hypot(dx, dy)
@@ -203,7 +217,7 @@ function placementsBetweenCornerAnchors(startPoint, endPoint, type, options = {}
 
   const usable = length - startOffset - endOffset
 
-  if (usable < rules.step_min) {
+  if (usable < rules.step_min && !allowBelowMin) {
     const d0 = clamp(startOffset, 0, length)
     const d1 = clamp(length - endOffset, 0, length)
     const t0 = clamp(d0 / length, 0, 1)
@@ -226,7 +240,7 @@ function placementsBetweenCornerAnchors(startPoint, endPoint, type, options = {}
 
   const placements = []
 
-  const { intervals, step, forced_step } = calculateStepAndIntervals(usable, rules.step_min, rules.step_max)
+  const { intervals, step, forced_step } = calculateStepAndIntervals(usable, rules.step_min, rules.step_max, { allowBelowMin })
   for (let i = 0; i <= intervals; i += 1) {
     const distance = startOffset + i * step
     const t = clamp(distance / length, 0, 1)

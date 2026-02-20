@@ -73,6 +73,27 @@ describe('fasteners.v1', () => {
     expect(side.placements.map((p) => p.distFromStart_mm)).toEqual([0, 450, 900])
   })
 
+  test('Для замков шаг уменьшается ниже 400 мм, если иначе равномерно не разложить', () => {
+    const vertices = [
+      { x: 0, y: 0 },
+      { x: 1050, y: 0 },
+      { x: 1050, y: 600 },
+      { x: 0, y: 600 },
+    ]
+    const sideConfig = {
+      A: { type: 'locks', cantaWidth_mm: 100 },
+      B: { type: 'none', cantaWidth_mm: 100 },
+      C: { type: 'none', cantaWidth_mm: 100 },
+      D: { type: 'none', cantaWidth_mm: 100 },
+    }
+
+    const side = computePolygonFasteners(vertices, sideConfig, { cornerOffset_mm: 25, sideNames: ['A', 'B', 'C', 'D'] })[0]
+
+    expect(side.forced_step).toBe(true)
+    expect(side.step_mm).toBeLessThan(400)
+    expect(side.placements.map((p) => p.distFromStart_mm)).toEqual([0, 317, 633, 950])
+  })
+
   test('Трапеция: корректные точки по всем сторонам', () => {
     const vertices = [{ x: 0, y: 0 }, { x: 1200, y: 0 }, { x: 1000, y: 700 }, { x: 200, y: 700 }]
     const sideConfig = {

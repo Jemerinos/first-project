@@ -38,7 +38,7 @@ function renderFastenerShape(vertices, side, placement, idx) {
     const angle = sideAngleDegrees(vertices, side.side)
     return (
       <g transform={`translate(${x} ${y}) rotate(${angle})`} {...commonProps}>
-        <rect x={-35} y={-17.5} width="70" height="35" rx="17.5" ry="17.5" fill="none" stroke="#000000" strokeWidth="2.5" />
+        <rect x={-21} y={-11} width="42" height="22" rx="11" ry="11" fill="none" stroke="#000000" strokeWidth="2.5" />
       </g>
     )
   }
